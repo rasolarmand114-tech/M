@@ -1,0 +1,64 @@
+name: Build Android ARM64 Kernel + Module
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1️⃣ کلون سورس کرنل Exynos850
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: rsuntkOrgs/kernel_samsung_exynos850
+          ref: v4.19.120
+          path: kernel
+
+      # 2️⃣ کلون repo که exlinux_defconfig در آن است
+      - name: Checkout defconfig repo
+        uses: actions/checkout@v4
+        with:
+          repository: rasolarmand114-tech/M
+          path: config_repo
+
+      # 3️⃣ نصب dependency های build
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+
+      # 4️⃣ تنظیم environment برای ARM64
+      - name: Setup build environment
+        run: |
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export O=$(pwd)/kernel/out
+
+      # 5️⃣ استفاده مستقیم از exlinux_defconfig
+      - name: Use exlinux_defconfig
+        run: |
+          cp config_repo/exlinux_defconfig kernel/out/.config
+
+      # 6️⃣ Build کرنل
+      - name: Build kernel
+        run: |
+          make -C kernel O=$O -j$(nproc)
+
+      # 7️⃣ Build ماژول‌ها (در صورت وجود)
+      - name: Build custom modules
+        run: |
+          make -C kernel/out M=$(pwd)/my_module ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules
+
+      # 8️⃣ Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: android-arm64-kernel
+          path: |
+            kernel/out/arch/arm64/boot/Image
+            my_module/*.ko
