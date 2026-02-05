@@ -9,55 +9,90 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    # env در سطح job تا بین steps پایدار بمونه
+    env:
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+      O: ${{ github.workspace }}/kernel/out
+
     steps:
-      # 1️⃣ کلون سورس کرنل Exynos850
-      - name: Checkout kernel source
+      - name: Checkout kernel source (Exynos850 v4.19.120)
         uses: actions/checkout@v4
         with:
           repository: rsuntkOrgs/kernel_samsung_exynos850
           ref: v4.19.120
           path: kernel
 
-      # 2️⃣ کلون repo که exlinux_defconfig در آن است
-      - name: Checkout defconfig repo
+      - name: Checkout defconfig repo (contains exlinux_defconfig)
         uses: actions/checkout@v4
         with:
           repository: rasolarmand114-tech/M
           path: config_repo
 
-      # 3️⃣ نصب dependency های build
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git \
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      # 4️⃣ تنظیم environment برای ARM64
-      - name: Setup build environment
+      - name: Prepare output dir and copy exlinux_defconfig
         run: |
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export O=$(pwd)/kernel/out
+          # make sure the O= directory exists and copy the defconfig there
+          mkdir -p "$O"
+          cp config_repo/exlinux_defconfig "$O/.config"
+          echo ">>> kernel/out contents:"
+          ls -la kernel/out || true
 
-      # 5️⃣ استفاده مستقیم از exlinux_defconfig
-      - name: Use exlinux_defconfig
+      - name: Show environment (debug)
         run: |
-          cp config_repo/exlinux_defconfig kernel/out/.config
+          echo "ARCH=$ARCH"
+          echo "CROSS_COMPILE=$CROSS_COMPILE"
+          echo "O=$O"
+          uname -a
+          free -h
+          nproc
 
-      # 6️⃣ Build کرنل
       - name: Build kernel
         run: |
-          make -C kernel O=$O -j$(nproc)
+          # build kernel (uses O= path from env)
+          make -C kernel O="$O" -j$(nproc)
 
-      # 7️⃣ Build ماژول‌ها (در صورت وجود)
-      - name: Build custom modules
+      - name: Build custom module (if exists)
         run: |
-          make -C kernel/out M=$(pwd)/my_module ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules
+          if [ -d "${{ github.workspace }}/my_module" ]; then
+            echo "Building my_module..."
+            make -C kernel O="$O" M="${{ github.workspace }}/my_module" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" modules
+          else
+            echo "No my_module directory found; skipping module build."
+          fi
 
-      - name: Upload artifacts
+      - name: Collect artifacts to single folder
+        run: |
+          mkdir -p artifacts
+          # copy kernel image if present (common path for arm64)
+          if [ -f "$O/arch/arm64/boot/Image" ]; then
+            cp "$O/arch/arm64/boot/Image" artifacts/
+          fi
+          # copy System.map and .config for debugging
+          if [ -f "$O/System.map" ]; then
+            cp "$O/System.map" artifacts/ || true
+          fi
+          if [ -f "$O/.config" ]; then
+            cp "$O/.config" artifacts/ || true
+          fi
+          # copy modules .ko if any were built
+          if compgen -G "${{ github.workspace }}/my_module/*.ko" > /dev/null 2>&1; then
+            cp "${{ github.workspace }}/my_module/"*.ko artifacts/ || true
+          fi
+          # Also collect built modules installed into kernel modules tree (optional)
+          if [ -d "$O/modules" ]; then
+            cp -r "$O/modules" artifacts/ || true
+          fi
+          echo "Artifacts prepared:"
+          ls -la artifacts || true
+
+      - name: Upload artifacts (kernel + modules)
         uses: actions/upload-artifact@v4
         with:
           name: android-arm64-kernel
-          path: |
-            kernel/out/arch/arm64/boot/Image
-            my_module/*.ko
+          path: artifacts/**
