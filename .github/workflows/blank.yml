@@ -1,4 +1,4 @@
-name: Build Android ARM64 Kernel + Module
+name: Build Android ARM64 Kernel (GCC-only, robust)
 
 on:
   workflow_dispatch:
@@ -8,91 +8,121 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # env در سطح job تا بین steps پایدار بمونه
     env:
       ARCH: arm64
-      CROSS_COMPILE: aarch64-linux-gnu-
-      O: ${{ github.workspace }}/kernel/out
+      SUBARCH: arm64
+      # بعد از extract، این prefix باید به bin/ آدرس دهی کنه. در صورت استفاده از apt، همین keep میمونه.
+      CROSS_PREFIX: /usr/bin/aarch64-linux-gnu-
+      # اگر میخوای از Linaro tarball استفاده کنی، بعد از extract به /opt/linaro/bin/aarch64-linux-gnu- اشاره خواهد شد.
+      TOOLCHAIN_DIR: ${{ github.workspace }}/toolchain
+      OUT_DIR: ${{ github.workspace }}/out
 
     steps:
-      - name: Checkout kernel source (Exynos850 v4.19.120)
+      - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
           repository: rsuntkOrgs/kernel_samsung_exynos850
           ref: v4.19.120
           path: kernel
 
-      - name: Checkout defconfig repo (contains exlinux_defconfig)
+      - name: Checkout defconfig repo
         uses: actions/checkout@v4
         with:
           repository: rasolarmand114-tech/M
           path: config_repo
 
-      - name: Install build dependencies
+      - name: Install base build packages (no clang)
         run: |
-          sudo apt update
-          sudo apt install -y build-essential bc bison flex libssl-dev libelf-dev dwarves git \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev dwarves wget xz-utils \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Prepare output dir and copy exlinux_defconfig
+      # OPTIONAL: get a specific Linaro toolchain (recommended for reproducibility)
+      - name: Download and extract Linaro toolchain (optional, faster & reproducible)
         run: |
-          # make sure the O= directory exists and copy the defconfig there
-          mkdir -p "$O"
-          cp config_repo/exlinux_defconfig "$O/.config"
-          echo ">>> kernel/out contents:"
-          ls -la kernel/out || true
+          # Uncomment and set TOOLCHAIN_URL to a Linaro GCC tar.xz if you prefer specific version
+          # TOOLCHAIN_URL="https://releases.linaro.org/components/toolchain/binaries/latest-7/aarch64-linux-gnu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu.tar.xz"
+          # mkdir -p "$TOOLCHAIN_DIR"
+          # wget -qO /tmp/toolchain.tar.xz "$TOOLCHAIN_URL"
+          # tar -xJf /tmp/toolchain.tar.xz -C "$TOOLCHAIN_DIR" --strip-components=1
+          # export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          echo "Using distro toolchain (apt). To use Linaro, uncomment TOOLCHAIN_URL lines."
 
-      - name: Show environment (debug)
+      - name: Prepare output dir and copy defconfig
         run: |
-          echo "ARCH=$ARCH"
-          echo "CROSS_COMPILE=$CROSS_COMPILE"
-          echo "O=$O"
-          uname -a
-          free -h
-          nproc
+          mkdir -p "$OUT_DIR"
+          cp config_repo/exlinux_defconfig "$OUT_DIR/.config"
+          echo "Copied defconfig to $OUT_DIR/.config"
+          ls -la "$OUT_DIR" || true
 
-      - name: Build kernel
+      - name: Toolchain checks (verbose)
         run: |
-          # build kernel (uses O= path from env)
-          make -C kernel O="$O" -j$(nproc)
+          echo "Check CROSS_PREFIX candidate:"
+          echo "CROSS_PREFIX=$CROSS_PREFIX"
+          echo "GCC version:"
+          ${CROSS_PREFIX}gcc --version || true
+          echo "AS version:"
+          ${CROSS_PREFIX}as --version || true
+          echo "LD version:"
+          ${CROSS_PREFIX}ld --version || true
+          echo "whereis aarch64-linux-gnu-gcc:"
+          which ${CROSS_PREFIX}gcc || true
 
-      - name: Build custom module (if exists)
+      - name: Build kernel (force GCC, full overrides)
         run: |
-          if [ -d "${{ github.workspace }}/my_module" ]; then
-            echo "Building my_module..."
-            make -C kernel O="$O" M="${{ github.workspace }}/my_module" ARCH="$ARCH" CROSS_COMPILE="$CROSS_COMPILE" modules
-          else
-            echo "No my_module directory found; skipping module build."
-          fi
+          set -euo pipefail
+          export CROSS_COMPILE=${CROSS_PREFIX}
+          export ARCH=arm64
+          export CC=${CROSS_PREFIX}gcc
+          export AS=${CROSS_PREFIX}as
+          export LD=${CROSS_PREFIX}ld
+          export AR=${CROSS_PREFIX}ar
+          export NM=${CROSS_PREFIX}nm
+          export OBJCOPY=${CROSS_PREFIX}objcopy
+          export OBJDUMP=${CROSS_PREFIX}objdump
+          export STRIP=${CROSS_PREFIX}strip
+          # Force no LLVM
+          export LLVM=0
+          echo "Build start: $(date)"; uname -a; nproc; free -h
+          # Normal build (parallel)
+          make -C kernel O="$OUT_DIR" \
+            ARCH=arm64 \
+            CROSS_COMPILE="${CROSS_PREFIX}" \
+            CC="${CC}" AS="${AS}" LD="${LD}" AR="${AR}" NM="${NM}" \
+            OBJCOPY="${OBJCOPY}" OBJDUMP="${OBJDUMP}" STRIP="${STRIP}" LLVM=0 -j$(nproc)
+          echo "Build finished: $(date)"
 
-      - name: Collect artifacts to single folder
+      - name: If failure: rerun with verbose single-job for diagnostics
+        if: failure()
+        run: |
+          echo "Build failed. Rerunning verbose single-job (V=1 -j1) to capture exact invocation..."
+          set +e
+          export CROSS_COMPILE=${CROSS_PREFIX}
+          export ARCH=arm64
+          export CC=${CROSS_PREFIX}gcc
+          export AS=${CROSS_PREFIX}as
+          export LD=${CROSS_PREFIX}ld
+          make -C kernel O="$OUT_DIR" ARCH=arm64 CROSS_COMPILE="${CROSS_PREFIX}" CC="${CC}" AS="${AS}" LD="${LD}" V=1 -j1 || true
+          # print last 200 lines of make log (if any)
+          echo "==== tail of build log ===="
+          tail -n 200 "$OUT_DIR"/build.log || true
+
+      - name: Collect artifacts
         run: |
           mkdir -p artifacts
-          # copy kernel image if present (common path for arm64)
-          if [ -f "$O/arch/arm64/boot/Image" ]; then
-            cp "$O/arch/arm64/boot/Image" artifacts/
+          cp -v "$OUT_DIR"/arch/arm64/boot/Image artifacts/ || true
+          cp -v "$OUT_DIR"/System.map artifacts/ || true
+          cp -v "$OUT_DIR"/.config artifacts/ || true
+          # copy built module(s) if user module dir present
+          if [ -d "${{ github.workspace }}/my_module" ]; then
+            make -C kernel O="$OUT_DIR" M="${{ github.workspace }}/my_module" ARCH=arm64 CROSS_COMPILE="${CROSS_PREFIX}" CC="${CC}" AS="${AS}" LD="${LD}" modules || true
+            cp -v "${{ github.workspace }}/my_module/"*.ko artifacts/ || true
           fi
-          # copy System.map and .config for debugging
-          if [ -f "$O/System.map" ]; then
-            cp "$O/System.map" artifacts/ || true
-          fi
-          if [ -f "$O/.config" ]; then
-            cp "$O/.config" artifacts/ || true
-          fi
-          # copy modules .ko if any were built
-          if compgen -G "${{ github.workspace }}/my_module/*.ko" > /dev/null 2>&1; then
-            cp "${{ github.workspace }}/my_module/"*.ko artifacts/ || true
-          fi
-          # Also collect built modules installed into kernel modules tree (optional)
-          if [ -d "$O/modules" ]; then
-            cp -r "$O/modules" artifacts/ || true
-          fi
-          echo "Artifacts prepared:"
           ls -la artifacts || true
 
-      - name: Upload artifacts (kernel + modules)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-arm64-kernel
+          name: exynos850-kernel-gcc
           path: artifacts/**
