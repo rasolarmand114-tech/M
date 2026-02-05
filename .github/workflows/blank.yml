@@ -54,9 +54,8 @@ jobs:
         run: |
           make -C kernel/out M=$(pwd)/my_module ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- modules
 
-      # 8️⃣ Upload artifacts
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: android-arm64-kernel
           path: |
