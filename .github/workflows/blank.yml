@@ -1,40 +1,77 @@
-name: Build Exynos850 Android Kernel (GCC only, robust)
+name: Kernel Build
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
-    # env در سطح job تا بین steps پایدار بمونه
     env:
       ARCH: arm64
-      SUBARCH: arm64
-      # prefix برای ابزارهای کراس؛ برای apt نصب‌شده این مقدار کافی است
       CROSS_COMPILE: aarch64-linux-gnu-
-      # OUT_DIR را به صورت مسیر workspace قرار می‌دهیم
-      OUT_DIR: ${{ github.workspace }}/out
-      KERNEL_SRC: kernel
-      DEFCONFIG_REPO_PATH: config_repo/exlinux_defconfig
-      MODULE_DIR: ${{ github.workspace }}/my_module
+      OUT_DIR: out
 
     steps:
-      - name: Checkout kernel source (Exynos850 v4.19.120)
+      # 1) سورس کرنل
+      - name: Checkout kernel source
         uses: actions/checkout@v4
         with:
           repository: rsuntkOrgs/kernel_samsung_exynos850
           ref: v4.19.120
           path: kernel
 
-      - name: Checkout defconfig repo (contains exlinux_defconfig)
+      # 2) ریپو defconfig
+      - name: Checkout defconfig
         uses: actions/checkout@v4
         with:
           repository: rasolarmand114-tech/M
           path: config_repo
 
+      # 3) نصب وابستگی‌ها (فقط GCC)
+      - name: Install build dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential bc bison flex \
+            libssl-dev libelf-dev dwarves \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu
+
+      # 4) آماده‌سازی out و کپی defconfig
+      - name: Prepare build directory
+        run: |
+          mkdir -p $OUT_DIR
+          cp config_repo/exlinux_defconfig $OUT_DIR/.config
+
+      # 5) چک تول‌چین
+      - name: Toolchain check
+        run: |
+          which ${CROSS_COMPILE}gcc
+          ${CROSS_COMPILE}gcc --version
+
+      # 6) بیلد کرنل (GCC only)
+      - name: Build kernel
+        run: |
+          make -C kernel \
+            O=$OUT_DIR \
+            ARCH=arm64 \
+            CROSS_COMPILE=$CROSS_COMPILE \
+            CC=${CROSS_COMPILE}gcc \
+            LLVM=0 \
+            -j$(nproc)
+
+      # 7) آپلود خروجی
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: exynos850-kernel
+          path: |
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/Image.gz
       - name: Install build dependencies (GCC toolchain, no clang)
         run: |
           sudo apt-get update
