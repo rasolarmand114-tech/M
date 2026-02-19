@@ -49,7 +49,7 @@ jobs:
       - name: Fetch toolchains (Clang 11 + GCC 4.9)
         run: |
           mkdir toolchains && cd toolchains
-          git clone --depth=1 -b https://github.com/kdrag0n/proton-clang/tree/9fb011b183fe7e69b04b873ef6533b4b077e3c5e clan
+          git clone --depth=1 -b https://github.com/kdrag0n/proton-clang/tree/9fb011b183fe7e69b04b873ef6533b4b077e3c5e clang
         working-directory: kernel_root
 
       - name: Set timezone (Asia/Kolkata)
