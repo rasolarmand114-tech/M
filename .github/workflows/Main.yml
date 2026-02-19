@@ -97,11 +97,6 @@ jobs:
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
 
-            - name: Upload config
-         uses: actions/upload-artifact@v4
-         with:
-         name: Config-${{ steps.buildKernel.outputs.buildDetails }}
-         path: kernel_root/build_config.txt
 
       
 
