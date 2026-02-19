@@ -7,22 +7,10 @@ on:
         description: Kernel branch
         default: 'main'
         required: true
-      AK3_NAME:
-        description: Enter custom name for AnyKernel3 artifact
-        required: true
-      KERNELSU_NEXT:
-        description: Use KernelSU-Next ?
-        type: boolean
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
         type: boolean
-      UPLOAD_TO_TG:
-        description: Upload to Telegram
-        type: boolean
-      UPLOAD_TO_GH:
-        description: Upload to GitHub Release
-        type: boolean
-      
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,7 +19,7 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          repository: maazm7d/kernel_samsung_a12
+          repository: rasolarmand114-tech/kernel_samsung_exynos850
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           show-progress: false
@@ -58,12 +46,6 @@ jobs:
           sudo rm /etc/localtime
           sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      - name: Clone KernelSU-Next
-        if: ${{ github.event.inputs.KERNELSU_NEXT == 'true' }}
-        run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
-        working-directory: kernel_root
- 
       - name: Build kernel
         id: buildKernel
         run: |
@@ -76,9 +58,9 @@ jobs:
           export IS_CI=true
           
 
-          export DEFCONFIG="exynos850-a12snsxx_defconfig"
+          export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
-          export KERNEL_SOURCE="https://github.com/maazm7d/kernel_samsung_a12"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/kernel_samsung_exynos850"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
           echo "Switching SELinux to Permissive mode..."
@@ -98,19 +80,8 @@ jobs:
 
           bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
-          
-         
-          
-          KSU_REV_COUNT=$(cd KernelSU-Next && git rev-list --count HEAD)
-          	KSU_VERSION=$(expr 10200 + $KSU_REV_COUNT)
-          SUSFS_VERSION="1.5.7"
-          
-          echo "- KernelSU version: $KSU_VERSION"
         
           echo -e "Localversion: $(./scripts/setlocalversion)\n\nClang version: $(clang -v 2>&1 | grep ' version ' | sed 's/[[:space:]]*$//')\n\nBuild: $BUILD_START\n\nDefconfig: $DEFCONFIG\n\nSELinux: $SELINUX_STATE\n\nKernelSU-Next: $KSU_VERSION\n\nSUSFS: $SUSFS_VERSION\n\nSource: $KERNEL_SOURCE" > buildDetails.txt
-
- 
-          echo "TITLE=Galaxy `echo $DEVICE_ID` Kernel" >> $GITHUB_ENV
 
           mv .config build_config.txt
           gitsha1=$(git rev-parse --short HEAD)
@@ -132,89 +103,3 @@ jobs:
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
 
-      - name: Copy Image to AnyKernel3
-        run: |
-          cp kernel_root/arch/arm64/boot/Image kernel_root/anykernel3/
-
-      - name: Upload AnyKernel3
-        uses: actions/upload-artifact@v4
-        with:
-          name: AnyKernel3-${{ github.event.inputs.AK3_NAME }}
-          path: kernel_root/anykernel3/*
-          compression-level: 9
-
-      - name: Download AnyKernel3 artifact
-        if: ${{ github.event.inputs.UPLOAD_TO_TG == 'true' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: AnyKernel3-${{ github.event.inputs.AK3_NAME }}
-          path: ak3_upload
-
-      - name: Create AnyKernel3 ZIP 
-        run: |
-          cd kernel_root/anykernel3
-          zip -r9 "AnyKernel3-${{ github.event.inputs.AK3_NAME }}.zip" ./*
-          ls -lh "AnyKernel3-${{ github.event.inputs.AK3_NAME }}.zip"
-          
-      - name: Upload to Telegram
-        if: github.event.inputs.UPLOAD_TO_TG == 'true'
-        env:
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-        run: |
-          if [ ! -z "${{ secrets.BOT_TOKEN }}" ]; then   
-          ZIP="./anykernel3/AnyKernel3-${{ github.event.inputs.AK3_NAME }}.zip"
-          cat buildDetails.txt
-          git clone --depth=1 -b telegram https://github.com/maazm7d/builder.git i && cp ./i/xedbot.sh . && rm -rf i
-          bash $(pwd)/xedbot.sh "$ZIP" "`cat buildDetails.txt`"
-          fi
-        working-directory: kernel_root
-
-      - name: Generate changelog
-        id: changelog
-        run: |
-          set -e
-          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -z "$latest_tag" ]; then
-          echo "No previous tag found. Using full commit history."
-          changelog=$(git log --pretty=format:"- %s (%an)" --no-merges)
-          else
-          echo "Found last tag: $latest_tag"
-          changelog=$(git log "${latest_tag}..HEAD" --pretty=format:"- %s (%an)" --no-merges)
-          fi
-
-                # Save changelog to output
-          echo "changelog<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$changelog" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
-        working-directory: kernel_root
-
-      - name: Generate tag name
-        id: tag
-        run: |
-          TAG_NAME="build-$(date +'%Y%m%d')-$(git rev-parse --short HEAD)"
-          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-        working-directory: kernel_root
-
-      - name: Upload to GitHub Release
-        if: github.event.inputs.UPLOAD_TO_GH == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag_name }}
-          name: "${{ steps.tag.outputs.tag_name }}"
-          body: ${{ steps.changelog.outputs.changelog }}
-          files: kernel_root/anykernel3/AnyKernel3-${{ github.event.inputs.AK3_NAME }}.zip
-          repository: maazm7d/kernel_samsung_a12
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-        
-
-
-
-
-        
-
-        
-
-      
-      
