@@ -19,6 +19,9 @@ jobs:
       - name: Prepare dependencies + fetch tags
         working-directory: kernel_root
         run: |
+          mkdir -p kernel_root
+          cd kernel_root
+          
           sudo apt update -y
           sudo apt install bc cpio flex bison aptitude git python-is-python3 tar perl wget curl lz4 -y
           sudo aptitude install libssl-dev -y
