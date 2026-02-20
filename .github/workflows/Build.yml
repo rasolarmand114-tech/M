@@ -49,8 +49,8 @@ jobs:
       - name: Build kernel
         id: buildKernel
         run: |
-          export PATH=$(pwd)/toolchain/clang/bin:$PATH
-          export CROSS_COMPILE=$(pwd)/toolchain/google/bin/aarch64-linux-android-
+          export PATH=$(pwd)/toolchain/proton-clang @ 9fb011b/bin:$PATH
+          export CROSS_COMPILE=$(pwd)/toolchain/proton-clang @ 9fb011b/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_BUILD_USER="maaz"
           export KBUILD_BUILD_HOST="github"
@@ -60,7 +60,7 @@ jobs:
 
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
-          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/kernel_samsung_exynos850"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-a12s"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
           echo "Switching SELinux to Permissive mode..."
