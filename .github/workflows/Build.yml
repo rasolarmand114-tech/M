@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          repository: rasolarmand114-tech/exlinux-a12s
+          repository: rasolarmand114-tech/exlinux-a12s-
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           show-progress: false
@@ -60,7 +60,7 @@ jobs:
 
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
-          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-a12s"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-a12s-"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
           echo "Switching SELinux to Permissive mode..."
