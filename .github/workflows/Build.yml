@@ -49,11 +49,11 @@ jobs:
       - name: Build kernel
         id: buildKernel
         run: |
-          export PATH=$(pwd)/toolchain/proton-clang/bin:$PATH
-          export CROSS_COMPILE=/toolchain/proton-clang/aarch64-linux-gnu/bin/
-          export CROSS_COMPILE_ANDROID_PROTON=/toolchain/proton-clang/bin/aarch64-linux-gnu-
+          export PATH=$(pwd)/kernel_root/toolchain/proton-clang/bin:$PATH
+          export CROSS_COMPILE=/kernel_root/toolchain/proton-clang/aarch64-linux-gnu/bin/
+          export CROSS_COMPILE_ANDROID_PROTON=/kernel_root/toolchain/proton-clang/bin/aarch64-linux-gnu-
           export CROSS_COMPILE_ANDROID_AARCH64_LINUX_GNU=
-                     /toolchain/proton-clang/aarch64-linux-gnu/bin
+                     /kernel_root/toolchain/proton-clang/aarch64-linux-gnu/bin
 
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_BUILD_USER="exlinux"
