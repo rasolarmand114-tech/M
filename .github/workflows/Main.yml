@@ -5,7 +5,7 @@ on:
     inputs:
       BRANCH:
         description: Kernel branch
-        default: 'android-4.19'
+        default: 'main'
         required: true
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          repository: rasolarmand114-tech/exlinux-a12s
+          repository: rasolarmand114-tech/exlinux-a12s-
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           show-progress: false
@@ -60,7 +60,7 @@ jobs:
 
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
-          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/kernel_samsung_exynos850"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-a12s-"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
           echo "Switching SELinux to Permissive mode..."
@@ -81,8 +81,8 @@ jobs:
           bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
         
-          echo -e "Localversion: $(./scripts/setlocalversion)\n\nClang version: $(clang -v 2>&1 | grep ' version ' | sed 's/[[:space:]]*$//')\n\nBuild: $BUILD_START\n\nDefconfig: $DEFCONFIG\n\nSELinux: $SELINUX_STATE\n\nKernelSU-Next: $KSU_VERSION\n\nSUSFS: $SUSFS_VERSION\n\nSource: $KERNEL_SOURCE" > buildDetails.txt
 
+  
           mv .config build_config.txt
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="`make kernelversion`-`echo $DEVICE`_`echo $gitsha1`-`date +'%Y%m%d%H%M%S'`" && echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
