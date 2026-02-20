@@ -24,7 +24,15 @@ jobs:
           ref: ${{ github.event.inputs.BRANCH }}
           show-progress: false
           fetch-depth: 0
-
+      - name: Clone Proton Clang (specific commit)
+        run: |
+          mkdir -p toolchain
+          git init toolchain/proton-clang
+          cd toolchain/proton-clang
+          git remote add origin https://github.com/kdrag0n/proton-clang.git
+          git fetch --depth=1 origin 9fb011b183fe7e69b04b873ef6533b4b077e3c5e
+          git checkout FETCH_HEAD
+    
       - name: Prepare dependencies + fetch tags
         run: |
           sudo apt update -y
