@@ -34,13 +34,7 @@ jobs:
           git fetch --tags --force
         working-directory: kernel_root
 
-      - name: Fetch toolchains (Clang 11 + GCC 4.9)
-        run: |
-          mkdir toolchains && cd toolchains
-          git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
-          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
-        working-directory: kernel_root
-
+      
       - name: Set timezone (Asia/Kolkata)
         run: |
           sudo rm /etc/localtime
@@ -49,11 +43,11 @@ jobs:
       - name: Build kernel
         id: buildKernel
         run: |
-          export PATH=$(pwd)/kernel_root/toolchain/proton-clang/bin:$PATH
-          export CROSS_COMPILE=/kernel_root/toolchain/proton-clang/aarch64-linux-gnu/bin/
-          export CROSS_COMPILE_ANDROID_PROTON=/kernel_root/toolchain/proton-clang/bin/aarch64-linux-gnu-
-          export CROSS_COMPILE_ANDROID_AARCH64_LINUX_GNU=
-                     /kernel_root/toolchain/proton-clang/aarch64-linux-gnu/bin
+          export PATH=$(pwd)/toolchain/proton-clang/bin:$PATH
+          export CROSS_COMPILE=$(pwd)/toolchain/proton-clang/aarch64-linux-gnu/bin/
+          export CROSS_COMPILE_ANDROID_PROTON="(pwd)/toolchain/proton-clang/bin/aarch64-linux-gnu-
+          export CROSS_COMPILE_ANDROID_AARCH64_LINUX_GNU=$(pwd)/toolchain/proton-clang/aarch64-linux-gnu/bin
+
 
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_BUILD_USER="exlinux"
