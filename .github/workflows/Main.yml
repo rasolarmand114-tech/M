@@ -5,7 +5,7 @@ on:
     inputs:
       BRANCH:
         description: Kernel branch
-        default: 'main'
+        default: 'android-4.19'
         required: true
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
