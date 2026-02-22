@@ -33,7 +33,15 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
         working-directory: kernel_root
-
+      - name: Create 12GB Swap
+        run: |
+          echo "Creating 12GB swap..."
+          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          echo "Swap enabled:"
+          free -h
       - name: Fetch toolchains (Clang 11 + GCC 4.9)
         run: |
           mkdir toolchains && cd toolchains
