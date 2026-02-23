@@ -72,7 +72,7 @@ jobs:
           export AR=aarch64-linux-gnu-ar
           export NM=aarch64-linux-gnu-nm
 
-          export DEFCONFIG="exlinux_defconfig"
+          export DEFCONFIG="exlinux2_defconfig"
           export DEVICE_ID="A12s"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
