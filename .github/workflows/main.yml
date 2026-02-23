@@ -71,7 +71,7 @@ jobs:
           export LD=aarch64-linux-gnu-ld
           export AR=aarch64-linux-gnu-ar
           export NM=aarch64-linux-gnu-nm
-
+          export KCFLAGS="-Wno-error=stringop-overflow"
           export DEFCONFIG="exlinux2_defconfig"
           export DEVICE_ID="A12s"
 
