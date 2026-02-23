@@ -1,0 +1,101 @@
+name: Build Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      BRANCH:
+        description: Kernel branch
+        default: 'main'
+        required: true
+      SELINUX_PERMISSIVE:
+        description: Permissive SELinux
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          repository: rasolarmand114-tech/linux-a12s
+          path: kernel_root
+          ref: ${{ github.event.inputs.BRANCH }}
+          fetch-depth: 0
+
+      - name: Prepare dependencies + fetch tags
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            bc cpio flex bison aptitude git python-is-python3 \
+            tar perl wget curl lz4 \
+            libssl-dev \
+            gcc-10 g++-10 \
+            gcc-10-aarch64-linux-gnu g++-10-aarch64-linux-gnu
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --tags --force
+        working-directory: kernel_root
+
+      - name: Recreate 12GB Swap
+        run: |
+          echo "Disabling existing swap..."
+          sudo swapoff -a || true
+
+          echo "Removing old swapfile..."
+          sudo rm -f /swapfile
+
+          echo "Creating 12GB swap..."
+          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+          echo "Swap status:"
+          swapon --show
+          free -h
+
+      - name: Set timezone (Asia/Kolkata)
+        run: |
+          sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+
+      - name: Build kernel (GCC 10)
+        id: buildKernel
+        working-directory: kernel_root
+        run: |
+          chmod +x gcc.sh
+
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CC=aarch64-linux-gnu-gcc-10
+          export LD=aarch64-linux-gnu-ld
+          export AR=aarch64-linux-gnu-ar
+          export NM=aarch64-linux-gnu-nm
+
+          export DEFCONFIG="exlinux_defconfig"
+          export DEVICE_ID="A12s"
+
+          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+            SELINUX_STATE="Permissive"
+          else
+            SELINUX_STATE="Enforcing"
+          fi
+
+          echo "SELinux is set to: $SELINUX_STATE"
+
+          bash gcc.sh --jobs $(nproc) $DEFCONFIG
+
+          mv .config build_config.txt
+
+          gitsha1=$(git rev-parse --short HEAD)
+          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+          echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
+      - name: Upload kernel images
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+          path: |
+            kernel_root/arch/arm64/boot/Image.gz
+            kernel_root/arch/arm64/boot/dts/exynos/*.dtb
+            kernel_root/arch/arm64/boot/dts/samsung/*.dtb
