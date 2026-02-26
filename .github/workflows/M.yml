@@ -41,7 +41,7 @@ jobs:
         make LDFLAGS="-static"
 
     - name: Upload Bash ELF artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: bash-arm64-static
         path: bash-5.3/bash
