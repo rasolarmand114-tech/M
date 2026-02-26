@@ -1,0 +1,47 @@
+name: Build Static Bash ARM64
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y musl-tools wget build-essential
+
+    - name: Download Bash source
+      run: |
+        wget https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz
+        tar xvf bash-5.3.tar.gz
+        cd bash-5.3
+
+    - name: Configure Bash for ARM64 static build
+      run: |
+        cd bash-5.3
+        export CC=aarch64-linux-musl-gcc
+        ./configure --host=aarch64-linux-musl \
+                    --prefix=/usr \
+                    --enable-static \
+                    --disable-nls \
+                    --disable-readline
+
+    - name: Build Bash
+      run: |
+        cd bash-5.3
+        make LDFLAGS="-static"
+
+    - name: Upload Bash ELF artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: bash-arm64-static
+        path: bash-5.3/bash
