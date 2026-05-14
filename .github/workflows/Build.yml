@@ -22,19 +22,93 @@ jobs:
           repository: rasolarmand114-tech/exlinux-a12s
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
-          show-progress: false
           fetch-depth: 0
 
-      - name: Download Prebuilt Proton Clang
-        run: |
-         
-          mkdir -p toolchain/proton-clang && curl -L https://github.com/kdrag0n/proton-clang-build/releases/download/20200117/proton_clang-11.0.0-20200117.tar.zst | tar -I zstd -xf - -C toolchain/proton-clang --strip-components=1
-    
       - name: Prepare dependencies + fetch tags
+        working-directory: kernel_root
         run: |
           sudo apt update -y
-          sudo apt install bc cpio flex bison aptitude git python-is-python3 tar perl wget curl lz4 -y
-          sudo aptitude install libssl-dev -y
+          sudo apt install -y \
+            bc cpio flex bison git python-is-python3 \
+            tar perl wget curl lz4 libssl-dev
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --tags --force
+
+      - name: Recreate 12GB Swap
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+      - name: Fetch toolchains (Clang 11 + GCC 4.9)
+        run: |
+          mkdir toolchains && cd toolchains
+          wget https://releases.linaro.org/components/toolchain/binaries/7.4-2019.02/aarch64-linux-gnu/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz
+          tar -xf gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu.tar.xz
+        working-directory: kernel_root
+
+      - name: Set timezone (Asia/Kolkata)
+        run: |
+          sudo rm /etc/localtime
+          sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+
+      - name: Build kernel
+        id: buildKernel
+        run: |
+          export PATH=$(pwd)/gcc-linaro-7.4.1-2019.02-x86_64_aarch64-linux-gnu/bin:$PATH
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export KBUILD_BUILD_USER="exlinux"
+          export KBUILD_BUILD_HOST="exlinux"
+          export BUILD_START=`date`
+          export IS_CI=true
+          
+
+          export DEFCONFIG="exlinux_V2_defconfig"
+          export DEVICE_ID="A12s"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-a12s"
+
+          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
+          echo "Switching SELinux to Permissive mode..."
+
+          
+          # Set permissive mode in defconfig
+          echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+          grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
+    
+          SELINUX_STATE="Permissive"
+          else
+          SELINUX_STATE="Enforcing"
+          fi
+
+          # Show final SELinux state
+          echo "SELinux is set to: $SELINUX_STATE"
+
+          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+
+        
+
+  
+          mv .config build_config.txt
+          gitsha1=$(git rev-parse --short HEAD)
+          buildDetails="`make kernelversion`-`echo $DEVICE`_`echo $gitsha1`-`date +'%Y%m%d%H%M%S'`" && echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
+        working-directory: kernel_root   
+
+      - name: Upload kernel images
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+          path: |
+            kernel_root/arch/arm64/boot/Image.gz
+            kernel_root/arch/arm64/boot/dts/exynos/*.dtb
+            kernel_root/arch/arm64/boot/dts/samsung/*.dtb
+
+
+                sudo aptitude install libssl-dev -y
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
         working-directory: kernel_root
