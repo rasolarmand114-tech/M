@@ -174,9 +174,8 @@ jobs:
 
 
                 sudo aptitude install libssl-dev -y
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --tags --force
-        working-directory: kernel_root
+          
+         working-directory: kernel_root
 
       
       - name: Set timezone (Asia/Kolkata)
