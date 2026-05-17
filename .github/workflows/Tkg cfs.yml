@@ -51,20 +51,6 @@ jobs:
           PATCH_DIR="tkg/linux419-tkg/linux419-tkg-patches"
           patch -p1 < "$PATCH_DIR/0003-glitched-cfs.patch"
 
-      - name: Configure kernel
-        working-directory: kernel_root
-        run: |
-          scripts/config --disable SCHED_EMS || true
-          scripts/config --disable SCHED_EMS_TUNE || true
-          scripts/config --disable CPU_FREQ_GOV_ENERGYSTEP || true
-          scripts/config --disable WERROR || true
-
-          scripts/config --enable SCHED_TUNE || true
-          scripts/config --enable ENERGY_MODEL || true
-          scripts/config --enable SCHED_MC || true
-
-          make olddefconfig
-
       - name: Build kernel
         working-directory: kernel_root
         run: |
