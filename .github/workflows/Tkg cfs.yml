@@ -5,19 +5,22 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Clone kernel source
-        run: |
-          git clone --depth=1 https://github.com/rasolarmand114-tech/kernel_samsung_a12.git kernel_root
+        uses: actions/checkout@v4
+        with:
+          repository: rasolarmand114-tech/kernel_samsung_a12
+          path: kernel_root
+          fetch-depth: 0
 
       - name: Install dependencies
         run: |
           sudo apt update -y
           sudo apt install -y \
             bc cpio flex bison git python-is-python3 \
-            tar perl wget curl lz4 libssl-dev
+            tar perl wget curl curl lz4 libssl-dev
 
       - name: Setup swap
         run: |
@@ -28,11 +31,6 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
-
-      - name: Set timezone
-        run: |
-          sudo rm -f /etc/localtime
-          sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
       - name: Clone toolchains
         working-directory: kernel_root
@@ -47,42 +45,25 @@ jobs:
         run: |
           git clone --depth=1 --branch legacy https://github.com/Frogging-Family/linux-tkg.git tkg
 
-      - name: Apply required patch
+      - name: Apply TKG CFS patch
         working-directory: kernel_root
         run: |
           PATCH_DIR="tkg/linux419-tkg/linux419-tkg-patches"
-          patchfile="$PATCH_DIR/0003-glitched-cfs.patch"
-
-          echo "Applying $patchfile"
-          patch --dry-run -p1 < "$patchfile"
-          patch -p1 < "$patchfile"
+          patch -p1 < "$PATCH_DIR/0003-glitched-cfs.patch"
 
       - name: Configure kernel
         working-directory: kernel_root
         run: |
-          # Keep CFS, disable Samsung EMS extras
           scripts/config --disable SCHED_EMS || true
           scripts/config --disable SCHED_EMS_TUNE || true
           scripts/config --disable CPU_FREQ_GOV_ENERGYSTEP || true
-
-          # Disable warnings-as-errors
           scripts/config --disable WERROR || true
-          scripts/config --disable FRAME_WARN || true
 
-          # Keep Android-compatible bits
           scripts/config --enable SCHED_TUNE || true
           scripts/config --enable ENERGY_MODEL || true
           scripts/config --enable SCHED_MC || true
-          scripts/config --enable CPU_FREQ_DEFAULT_GOV_SCHEDUTIL || true
 
           make olddefconfig
-
-      - name: Verify config
-        working-directory: kernel_root
-        run: |
-          grep CONFIG_SCHED_EMS .config || true
-          grep CONFIG_WERROR .config || true
-          grep CONFIG_FRAME_WARN .config || true
 
       - name: Build kernel
         working-directory: kernel_root
@@ -90,16 +71,9 @@ jobs:
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export KBUILD_BUILD_USER="exlinux"
-          export KBUILD_BUILD_HOST="github"
-          export BUILD_START=$(date)
-          export IS_CI=true
           export KCFLAGS="-Wno-error"
 
-          export DEFCONFIG="exlinux_defconfig"
-          export DEVICE_ID="A12s"
-          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/kernel_samsung_a12
-
+          export DEFCONFIG=exlinux_defconfig
           bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
       - name: Upload Image
@@ -107,7 +81,5 @@ jobs:
         with:
           name: Kernel-Image
           path: |
-            kernel_root/out/arch/arm64/boot/Image
-            kernel_root/out/arch/arm64/boot/Image.gz
-            kernel_root/out/arch/arm64/boot/Image.gz-dtb
+            kernel_root/out/arch/arm64/boot/Image*
           if-no-files-found: warn
