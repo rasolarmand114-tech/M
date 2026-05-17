@@ -1,0 +1,122 @@
+name: Build Android Kernel with MuQSS + UKSM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Clone kernel source
+        run: |
+          git clone --depth=1 https://github.com/rasolarmand114-tech/A127f-T-sc.git kernel_root
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            bc cpio flex bison git python-is-python3 \
+            tar perl wget curl lz4 libssl-dev
+
+      - name: Setup swap
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
+          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Set timezone
+        run: |
+          sudo rm -f /etc/localtime
+          sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+
+      - name: Clone toolchains
+        working-directory: kernel_root
+        run: |
+          mkdir -p toolchains
+          cd toolchains
+          git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
+          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
+
+      - name: Download linux-tkg patches
+        working-directory: kernel_root
+        run: |
+          git clone --depth=1 --branch legacy \
+            https://github.com/Frogging-Family/linux-tkg.git tkg
+
+      - name: Apply required patches
+        working-directory: kernel_root
+        run: |
+          PATCH_DIR="tkg/linux419-tkg/linux419-tkg-patches"
+
+          find "$PATCH_DIR" -type f | grep -Ei \
+          "muqss|uksm|0001-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch" \
+          > patchlist.txt || true
+
+          cat patchlist.txt
+
+          while read patchfile; do
+            echo "Applying $patchfile"
+            patch --dry-run -p1 < "$patchfile"
+            patch -p1 < "$patchfile"
+          done < patchlist.txt
+
+      - name: Configure kernel
+        working-directory: kernel_root
+        run: |
+          # Disable Samsung extras
+          scripts/config --disable SCHED_EMS || true
+          scripts/config --disable SCHED_EMS_TUNE || true
+          scripts/config --disable CPU_FREQ_GOV_ENERGYSTEP || true
+
+          # Enable MuQSS
+          scripts/config --enable SCHED_MUQSS || true
+
+          # Disable KSM / Enable UKSM
+          scripts/config --disable KSM || true
+          scripts/config --enable UKSM || true
+
+          # Keep Android-compatible bits
+          scripts/config --enable SCHED_TUNE || true
+          scripts/config --enable ENERGY_MODEL || true
+          scripts/config --enable SCHED_MC || true
+          scripts/config --enable CPU_FREQ_DEFAULT_GOV_SCHEDUTIL || true
+
+      - name: Verify config
+        working-directory: kernel_root
+        run: |
+          grep CONFIG_SCHED_MUQSS .config
+          grep CONFIG_UKSM .config
+          grep CONFIG_KSM .config || true
+          grep CONFIG_SCHED_EMS .config || true
+
+      - name: Build kernel
+        working-directory: kernel_root
+        run: |
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export KBUILD_BUILD_USER="exlinux"
+          export KBUILD_BUILD_HOST="github"
+          export BUILD_START=$(date)
+          export IS_CI=true
+
+          export DEFCONFIG="exlinux_defconfig"
+          export DEVICE_ID="A12s"
+          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/A127f-T-sc
+
+          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-Image
+          path: |
+            kernel_root/out/arch/arm64/boot/Image
+            kernel_root/out/arch/arm64/boot/Image.gz
+            kernel_root/out/arch/arm64/boot/Image.gz-dtb
+          if-no-files-found: warn
