@@ -54,7 +54,7 @@ jobs:
 
           for patchfile in \
             "$PATCH_DIR/0003-glitched-cfs.patch" \
-            "$PATCH_DIR/0008-uksm.patch" \
+            
             "$PATCH_DIR/0001-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
           do
             echo "Applying $patchfile"
@@ -71,10 +71,8 @@ jobs:
           scripts/config --disable SCHED_EMS_TUNE || true
           scripts/config --disable CPU_FREQ_GOV_ENERGYSTEP || true
 
-          # Disable KSM / Enable UKSM
           
-          scripts/config --enable UKSM || true
-
+          
           # Keep Android-compatible bits
           scripts/config --enable SCHED_TUNE || true
           scripts/config --enable ENERGY_MODEL || true
@@ -86,7 +84,7 @@ jobs:
       - name: Verify config
         working-directory: kernel_root
         run: |
-          grep CONFIG_UKSM .config || true
+          
           
 
           grep CONFIG_SCHED_EMS .config || true
