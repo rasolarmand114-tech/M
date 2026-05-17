@@ -1,4 +1,4 @@
-name: Build Android Kernel with TKG CFS + UKSM
+name: Build Android Kernel with TKG CFS
 
 on:
   workflow_dispatch:
@@ -54,7 +54,6 @@ jobs:
 
           for patchfile in \
             "$PATCH_DIR/0003-glitched-cfs.patch" \
-            
             "$PATCH_DIR/0001-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
           do
             echo "Applying $patchfile"
@@ -65,29 +64,28 @@ jobs:
       - name: Configure kernel
         working-directory: kernel_root
         run: |
-          # Keep CFS, disable MuQSS and Samsung EMS extras
-          
+          # Keep CFS, disable Samsung EMS extras
           scripts/config --disable SCHED_EMS || true
           scripts/config --disable SCHED_EMS_TUNE || true
           scripts/config --disable CPU_FREQ_GOV_ENERGYSTEP || true
 
-          
-          
+          # Disable warnings-as-errors
+          scripts/config --disable WERROR || true
+          scripts/config --disable FRAME_WARN || true
+
           # Keep Android-compatible bits
           scripts/config --enable SCHED_TUNE || true
           scripts/config --enable ENERGY_MODEL || true
           scripts/config --enable SCHED_MC || true
           scripts/config --enable CPU_FREQ_DEFAULT_GOV_SCHEDUTIL || true
 
-          
+          make olddefconfig
 
       - name: Verify config
         working-directory: kernel_root
         run: |
-          
-          
-
           grep CONFIG_SCHED_EMS .config || true
+          grep CONFIG_WERROR .config || true
 
       - name: Build kernel
         working-directory: kernel_root
@@ -99,6 +97,7 @@ jobs:
           export KBUILD_BUILD_HOST="github"
           export BUILD_START=$(date)
           export IS_CI=true
+          export KCFLAGS="-Wno-error"
 
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
