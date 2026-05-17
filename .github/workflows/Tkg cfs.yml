@@ -10,7 +10,7 @@ jobs:
     steps:
       - name: Clone kernel source
         run: |
-          git clone --depth=1 https://github.com/rasolarmand114-tech/A127f-T-sc.git kernel_root
+          git clone --depth=1 https://github.com/rasolarmand114-tech/kernel_samsung_a12.git kernel_root
 
       - name: Install dependencies
         run: |
@@ -98,7 +98,7 @@ jobs:
 
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
-          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/A127f-T-sc
+          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/kernel_samsung_a12
 
           bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
