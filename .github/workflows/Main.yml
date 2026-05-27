@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          repository: rasolarmand114-tech/exlinux-a12s
+          repository: rasolarmand114-tech/exlinux
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
@@ -68,7 +68,7 @@ jobs:
           export IS_CI=true
           
 
-          export DEFCONFIG="exlinux_defconfig"
+          export DEFCONFIG="exynos850-a12snsxx_defconfig"
           export DEVICE_ID="A12s"
           export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-a12s"
 
