@@ -11,7 +11,7 @@ jobs:
       - name: Clone kernel source
         uses: actions/checkout@v4
         with:
-          repository: rasolarmand114-tech/kernel_samsung_a12
+          repository: rasolarmand114-tech/exlinux
           path: kernel_root
           fetch-depth: 0
 
@@ -49,7 +49,7 @@ jobs:
         working-directory: kernel_root
         run: |
           PATCH_DIR="tkg/linux419-tkg/linux419-tkg-patches"
-          patch -p1 < "$PATCH_DIR/0003-glitched-cfs.patch"
+          patch -p1 < "$PATCH_DIR/0001-add-sysctl-to-disallow-unprivileged-CLONE_NEWUSER-by.patch"
 
       - name: Build kernel
         working-directory: kernel_root
@@ -59,7 +59,7 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KCFLAGS="-Wno-error"
 
-          export DEFCONFIG=exlinux_defconfig
+          export DEFCONFIG=exynos850-a12snsxx_defconfig
           bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
       - name: Upload Image
