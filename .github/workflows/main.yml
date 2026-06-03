@@ -16,6 +16,7 @@ jobs:
     env:
       BASH_VER: 5.2.37
       TOOLCHAIN_URL: https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-2025.08-1.tar.xz
+      CROSS_PREFIX: aarch64-linux-musl-
 
     steps:
       - name: Checkout
@@ -30,7 +31,7 @@ jobs:
             bison flex texinfo \
             autoconf automake libtool
 
-      - name: Download Bootlin musl toolchain
+      - name: Download toolchain
         run: |
           wget -q "$TOOLCHAIN_URL" -O toolchain.tar.xz
           tar -xf toolchain.tar.xz
@@ -48,13 +49,13 @@ jobs:
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
           export PATH="$TOOLCHAIN_DIR/bin:$PATH"
 
-          export CC=aarch64-linux-musl-gcc
-          export CXX=aarch64-linux-musl-g++
-          export AR=aarch64-linux-musl-ar
-          export AS=aarch64-linux-musl-as
-          export LD=aarch64-linux-musl-ld
-          export RANLIB=aarch64-linux-musl-ranlib
-          export STRIP=aarch64-linux-musl-strip
+          export CC="${CROSS_PREFIX}gcc"
+          export CXX="${CROSS_PREFIX}g++"
+          export AR="${CROSS_PREFIX}ar"
+          export AS="${CROSS_PREFIX}as"
+          export LD="${CROSS_PREFIX}ld"
+          export RANLIB="${CROSS_PREFIX}ranlib"
+          export STRIP="${CROSS_PREFIX}strip"
           export HOSTCC=gcc
 
           cd bash
@@ -71,13 +72,13 @@ jobs:
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
           export PATH="$TOOLCHAIN_DIR/bin:$PATH"
 
-          export CC=aarch64-linux-musl-gcc
-          export CXX=aarch64-linux-musl-g++
-          export AR=aarch64-linux-musl-ar
-          export AS=aarch64-linux-musl-as
-          export LD=aarch64-linux-musl-ld
-          export RANLIB=aarch64-linux-musl-ranlib
-          export STRIP=aarch64-linux-musl-strip
+          export CC="${CROSS_PREFIX}gcc"
+          export CXX="${CROSS_PREFIX}g++"
+          export AR="${CROSS_PREFIX}ar"
+          export AS="${CROSS_PREFIX}as"
+          export LD="${CROSS_PREFIX}ld"
+          export RANLIB="${CROSS_PREFIX}ranlib"
+          export STRIP="${CROSS_PREFIX}strip"
 
           cd bash
           make -j"$(nproc)" LDFLAGS="-static"
@@ -95,7 +96,7 @@ jobs:
         run: |
           set -euxo pipefail
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          "$TOOLCHAIN_DIR/bin/aarch64-linux-musl-strip" bash/bash || true
+          "$TOOLCHAIN_DIR/bin/${CROSS_PREFIX}strip" bash/bash || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
