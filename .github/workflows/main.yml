@@ -16,7 +16,6 @@ jobs:
     env:
       BASH_VER: 5.2.37
       TOOLCHAIN_URL: https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-2025.08-1.tar.xz
-      CROSS_PREFIX: aarch64-linux-musl-
 
     steps:
       - name: Checkout
@@ -31,7 +30,7 @@ jobs:
             bison flex texinfo \
             autoconf automake libtool
 
-      - name: Download toolchain
+      - name: Download Bootlin musl toolchain
         run: |
           wget -q "$TOOLCHAIN_URL" -O toolchain.tar.xz
           tar -xf toolchain.tar.xz
@@ -42,61 +41,47 @@ jobs:
           tar -xf bash.tar.gz
           mv "bash-${BASH_VER}" bash
 
-      - name: Configure Bash
-        run: |
-          set -euxo pipefail
-
-          TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
-
-          export CC="${CROSS_PREFIX}gcc"
-          export CXX="${CROSS_PREFIX}g++"
-          export AR="${CROSS_PREFIX}ar"
-          export AS="${CROSS_PREFIX}as"
-          export LD="${CROSS_PREFIX}ld"
-          export RANLIB="${CROSS_PREFIX}ranlib"
-          export STRIP="${CROSS_PREFIX}strip"
-          export HOSTCC=gcc
-
-          cd bash
-          ./configure \
-            --host=aarch64-linux-musl \
-            --disable-nls \
-            --without-bash-malloc \
-            --enable-static-link
-
       - name: Build Bash
         run: |
           set -euxo pipefail
 
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          GCC_BIN="$(find "$TOOLCHAIN_DIR/bin" -maxdepth 1 -type f -name '*gcc' | sort | head -n1)"
+          PREFIX="${GCC_BIN%gcc}"
+          HOST_TRIPLE="${PREFIX%-}"
 
-          export CC="${CROSS_PREFIX}gcc"
-          export CXX="${CROSS_PREFIX}g++"
-          export AR="${CROSS_PREFIX}ar"
-          export AS="${CROSS_PREFIX}as"
-          export LD="${CROSS_PREFIX}ld"
-          export RANLIB="${CROSS_PREFIX}ranlib"
-          export STRIP="${CROSS_PREFIX}strip"
+          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          export CC="${PREFIX}gcc"
+          export CXX="${PREFIX}g++"
+          export AR="${PREFIX}ar"
+          export AS="${PREFIX}as"
+          export LD="${PREFIX}ld"
+          export RANLIB="${PREFIX}ranlib"
+          export STRIP="${PREFIX}strip"
+          export HOSTCC=gcc
+          export CFLAGS="-Os -static"
+          export CPPFLAGS="$CFLAGS"
+          export LDFLAGS="-static"
 
           cd bash
-          make -j"$(nproc)" LDFLAGS="-static"
+          ./configure \
+            --host="$HOST_TRIPLE" \
+            --disable-nls \
+            --without-bash-malloc \
+            --enable-static-link \
+            --enable-largefile \
+            --enable-alias \
+            --enable-history
 
-      - name: Verify static binary
-        run: |
-          set -euxo pipefail
-          file bash/bash
-          if readelf -d bash/bash 2>/dev/null | grep -q 'NEEDED'; then
+          make -j"$(nproc)"
+
+          file bash
+          if readelf -d bash 2>/dev/null | grep -q 'NEEDED'; then
             echo "::error::Bash is not fully static"
             exit 1
           fi
 
-      - name: Strip binary
-        run: |
-          set -euxo pipefail
-          TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          "$TOOLCHAIN_DIR/bin/${CROSS_PREFIX}strip" bash/bash || true
+          strip -s bash || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
