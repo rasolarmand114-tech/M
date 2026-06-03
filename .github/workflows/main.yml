@@ -30,7 +30,7 @@ jobs:
             bison flex texinfo \
             autoconf automake libtool
 
-      - name: Download Bootlin musl toolchain
+      - name: Download musl toolchain
         run: |
           wget -q "$TOOLCHAIN_URL" -O toolchain.tar.xz
           tar -xf toolchain.tar.xz
@@ -48,7 +48,7 @@ jobs:
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
           GCC_BIN="$(find "$TOOLCHAIN_DIR/bin" -maxdepth 1 -type f -name '*gcc' | sort | head -n1)"
           PREFIX="${GCC_BIN%gcc}"
-          HOST_TRIPLE="${PREFIX%-}"
+          HOST_TRIPLE="$(basename "$GCC_BIN" | sed 's/-gcc$//')"
 
           export PATH="$TOOLCHAIN_DIR/bin:$PATH"
           export CC="${PREFIX}gcc"
@@ -60,10 +60,11 @@ jobs:
           export STRIP="${PREFIX}strip"
           export HOSTCC=gcc
           export CFLAGS="-Os -static"
-          export CPPFLAGS="$CFLAGS"
+          export CPPFLAGS="-Os -static"
           export LDFLAGS="-static"
 
           cd bash
+
           ./configure \
             --host="$HOST_TRIPLE" \
             --disable-nls \
@@ -81,7 +82,7 @@ jobs:
             exit 1
           fi
 
-          strip -s bash || true
+          "$PREFIX"strip -s bash || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
