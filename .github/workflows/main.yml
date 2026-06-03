@@ -46,11 +46,13 @@ jobs:
           set -euxo pipefail
 
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          GCC_BIN="$(find "$TOOLCHAIN_DIR/bin" -maxdepth 1 -type f -name '*gcc' | sort | head -n1)"
-          PREFIX="${GCC_BIN%gcc}"
-          HOST_TRIPLE="$(basename "$GCC_BIN" | sed 's/-gcc$//')"
+          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
 
-          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
+          # پیدا کردن خودِ compiler واقعی از داخل toolchain
+          GCC_BIN="$(find "$TOOLCHAIN_BIN" -maxdepth 1 -type f -name '*gcc' | sort | head -n1)"
+          PREFIX="${GCC_BIN%gcc}"
+
+          export PATH="$TOOLCHAIN_BIN:$PATH"
           export CC="${PREFIX}gcc"
           export CXX="${PREFIX}g++"
           export AR="${PREFIX}ar"
@@ -59,12 +61,14 @@ jobs:
           export RANLIB="${PREFIX}ranlib"
           export STRIP="${PREFIX}strip"
           export HOSTCC=gcc
-          export CFLAGS="-Os -static"
-          export CPPFLAGS="-Os -static"
-          export LDFLAGS="-static"
+
+          # host triple را از خود compiler بگیر تا configure روی x86_64 برنگردد
+          HOST_TRIPLE="$($CC -dumpmachine)"
+          echo "Using CC=$CC"
+          echo "Using HOST_TRIPLE=$HOST_TRIPLE"
+          $CC --version
 
           cd bash
-
           ./configure \
             --host="$HOST_TRIPLE" \
             --disable-nls \
@@ -74,15 +78,16 @@ jobs:
             --enable-alias \
             --enable-history
 
-          make -j"$(nproc)"
+          make -j"$(nproc)" LDFLAGS="-static"
 
           file bash
+          readelf -h bash | grep Machine
           if readelf -d bash 2>/dev/null | grep -q 'NEEDED'; then
             echo "::error::Bash is not fully static"
             exit 1
           fi
 
-          "$PREFIX"strip -s bash || true
+          "${STRIP}" -s bash || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
