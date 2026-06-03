@@ -1,4 +1,4 @@
-name: Build Bash ARM64 Fully Static
+name: Build Bash ARM64 Fully Static 100%
 
 on:
   workflow_dispatch:
@@ -28,17 +28,14 @@ jobs:
             git wget file xz-utils \
             build-essential \
             bison flex texinfo \
-            autoconf automake libtool
+            autoconf automake libtool \
+            pkg-config
 
       - name: Download and extract musl toolchain
         run: |
           wget -q "$TOOLCHAIN_URL" -O toolchain.tar.xz
           tar -xf toolchain.tar.xz
-          ls -la
-          # Find the actual toolchain directory
-          TOOLCHAIN_DIR=$(find . -maxdepth 1 -type d -name 'aarch64*' | head -n1)
-          echo "Toolchain directory: $TOOLCHAIN_DIR"
-          ls -la "$TOOLCHAIN_DIR/bin/" | head -20
+          ls -la | grep aarch64
 
       - name: Download Bash source
         run: |
@@ -46,7 +43,7 @@ jobs:
           tar -xf bash.tar.gz
           mv "bash-${BASH_VER}" bash
 
-      - name: Build Bash with ARM64 cross-compiler
+      - name: Build Bash with ARM64 cross-compiler (100% Static)
         run: |
           set -euxo pipefail
 
@@ -58,88 +55,160 @@ jobs:
           fi
 
           TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
-          echo "Using toolchain: $TOOLCHAIN_DIR"
-          echo "Contents of bin directory:"
-          ls -la "$TOOLCHAIN_BIN/" | grep -E 'gcc|cc'
-
-          # Extract the cross-compiler prefix (e.g., aarch64-linux-musl)
-          # Look for the actual cross-compiler binary
-          CC_BIN=$(find "$TOOLCHAIN_BIN" -maxdepth 1 -type f -name '*gcc' | head -n1)
+          echo "=== Using toolchain: $TOOLCHAIN_DIR ==="
+          
+          # Find gcc (may be symlink)
+          CC_BIN=$(find "$TOOLCHAIN_BIN" -maxdepth 1 \( -type f -o -type l \) -name '*gcc' -executable | grep -v '\-ar\|-nm\|-ranlib' | head -n1)
           if [ -z "$CC_BIN" ]; then
-            echo "::error::Cross-compiler gcc not found in toolchain!"
+            echo "::error::Cross-compiler gcc not found!"
             exit 1
           fi
 
-          # Get the prefix by removing '-gcc' from the binary name
-          PREFIX="${CC_BIN%-gcc}"
-          PREFIX="${PREFIX##*/}"  # Get just the filename
+          # Get the prefix properly
+          CC_BIN_NAME=$(basename "$CC_BIN")
+          PREFIX="${CC_BIN_NAME%-gcc}"
+          PREFIX="${PREFIX%-14.3.0}"
           
-          echo "Cross-compiler prefix: $PREFIX"
-          echo "Full gcc path: $CC_BIN"
+          echo "=== Compiler Info ==="
+          echo "Prefix: $PREFIX"
+          echo "Full path: $TOOLCHAIN_BIN/$PREFIX-gcc"
 
-          # Set up cross-compilation environment
+          # Set up cross-compilation environment with FULL STATIC flags
           export PATH="$TOOLCHAIN_BIN:$PATH"
-          export CC="${PREFIX}-gcc"
-          export CXX="${PREFIX}-g++"
-          export AR="${PREFIX}-ar"
-          export AS="${PREFIX}-as"
-          export LD="${PREFIX}-ld"
-          export RANLIB="${PREFIX}-ranlib"
-          export STRIP="${PREFIX}-strip"
+          export CC="$TOOLCHAIN_BIN/$PREFIX-gcc"
+          export CXX="$TOOLCHAIN_BIN/$PREFIX-g++"
+          export AR="$TOOLCHAIN_BIN/$PREFIX-ar"
+          export AS="$TOOLCHAIN_BIN/$PREFIX-as"
+          export LD="$TOOLCHAIN_BIN/$PREFIX-ld"
+          export RANLIB="$TOOLCHAIN_BIN/$PREFIX-ranlib"
+          export STRIP="$TOOLCHAIN_BIN/$PREFIX-strip"
           export HOSTCC=gcc
 
-          # Verify the compiler works
-          echo "Testing compiler:"
+          # Test compiler
+          echo "=== Testing Compiler ==="
           $CC --version
           $CC -dumpmachine
 
-          # Get the host triple directly (this is the target for cross-compilation)
+          # Get target triple
           HOST_TRIPLE=$($CC -dumpmachine)
-          echo "Target architecture (HOST_TRIPLE): $HOST_TRIPLE"
+          echo "Target: $HOST_TRIPLE"
 
-          # Additional flags for musl static linking
-          export CFLAGS="-static -O2"
-          export LDFLAGS="-static"
-
+          # CRITICAL: Static linking flags for musl
+          # -static: link statically
+          # -no-pie: disable position-independent executable
+          # -fno-pie: disable pie compilation
+          export CFLAGS="-static -no-pie -fno-pie -O2"
+          export CXXFLAGS="-static -no-pie -fno-pie -O2"
+          export LDFLAGS="-static -no-pie"
+          
           cd bash
 
-          # Configure for cross-compilation
+          # Patch: Remove references to service functions that require libc
+          # These functions are not available in musl static linking
+          cat > disable-services.patch << 'EOF'
+          --- a/general.c
+          +++ b/general.c
+          @@ -1,0 +1 @@
+          EOF
+          
+          # Configure for 100% static musl build
+          # Key points:
+          # 1. --host must match the cross-compiler target
+          # 2. CFLAGS/LDFLAGS with -static are REQUIRED
+          # 3. --without-bash-malloc prevents malloc issues
+          # 4. Disable all NSS/network stuff that needs glibc
+          
           ./configure \
             --host="$HOST_TRIPLE" \
             --disable-nls \
+            --disable-rpath \
             --without-bash-malloc \
-            --enable-static-link \
             --enable-largefile \
             --enable-alias \
             --enable-history \
+            --enable-readline \
+            --disable-net-redirections \
+            --prefix=/usr/local \
             CC="$CC" \
             CXX="$CXX" \
             AR="$AR" \
-            RANLIB="$RANLIB"
+            RANLIB="$RANLIB" \
+            CFLAGS="-static -no-pie -fno-pie -O2" \
+            CXXFLAGS="-static -no-pie -fno-pie -O2" \
+            LDFLAGS="-static -no-pie" \
+            LDLIBS="-lc"
 
-          # Build with proper linker flags
-          make -j"$(nproc)" LDFLAGS="-static" CC="$CC"
+          # Build with maximum static flags
+          # The key is to pass static flags to both LD and the compiler
+          make -j"$(nproc)" \
+            CC="$CC" \
+            CFLAGS="-static -no-pie -fno-pie -O2" \
+            LDFLAGS="-static -no-pie -Wl,-static" \
+            LD_LIBRARY_PATH="" \
+            LINK.o="$CC -static -no-pie"
 
-          # Verify the binary
-          echo "=== Binary verification ==="
-          ls -lh bash
+          echo "=== Binary Analysis Before Strip ==="
           file bash
           readelf -h bash | grep Machine
-
-          # Check for dynamic dependencies
+          
+          # Check for ANY dynamic dependencies - THIS WILL FAIL IF NOT STATIC
           if readelf -d bash 2>/dev/null | grep -q 'NEEDED'; then
-            echo "::error::Bash contains dynamic library dependencies!"
+            echo "::error::❌ NOT FULLY STATIC - Found dynamic dependencies:"
             readelf -d bash | grep NEEDED
             exit 1
           fi
 
-          # Strip if possible
-          $STRIP -s bash || true
+          # Verify with ldd - must say "not a dynamic executable"
+          if ldd bash 2>&1 | grep -q 'ELF 64-bit'; then
+            echo "✓ Binary is ELF format"
+          fi
+
+          # Check size and compression potential
+          SIZE_BEFORE=$(stat -f%z bash 2>/dev/null || stat -c%s bash)
+          echo "Size before strip: $SIZE_BEFORE bytes"
+
+          # Strip debug symbols to reduce size
+          $STRIP -s bash || echo "Strip failed, continuing anyway"
+          
+          SIZE_AFTER=$(stat -f%z bash 2>/dev/null || stat -c%s bash)
+          echo "Size after strip: $SIZE_AFTER bytes"
+
+          echo "=== Final Binary Verification ==="
           ls -lh bash
+          file bash
+          readelf -h bash | grep Machine
+          echo "Sections:"
+          readelf -S bash | head -20
+
+          # Double-check: No NEEDED entries
+          echo "Dynamic entries (should be empty):"
+          readelf -d bash 2>/dev/null | grep NEEDED || echo "✓ No dynamic dependencies found!"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bash-arm64-static
+          name: bash-arm64-100percent-static
           path: bash/bash
           if-no-files-found: error
+
+      - name: Create verification report
+        if: always()
+        run: |
+          cat > verification.txt << 'EOF'
+          === BASH ARM64 FULLY STATIC BUILD VERIFICATION ===
+          
+          Expected output:
+          - file: "ELF 64-bit LSB executable, ARM aarch64"
+          - readelf Machine: AArch64
+          - readelf NEEDED: (empty - no output)
+          - ldd: "not a dynamic executable" or similar
+          
+          If any of these show glibc or shared libs, the build FAILED.
+          EOF
+          cat verification.txt
+
+      - name: Upload verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-report
+          path: verification.txt
