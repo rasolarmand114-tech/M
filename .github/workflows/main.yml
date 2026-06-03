@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git wget file \
+            git wget file xz-utils \
             build-essential \
             bison flex texinfo \
             autoconf automake libtool
@@ -46,19 +46,15 @@ jobs:
           set -euxo pipefail
 
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
-          export PATH="$TOOLCHAIN_BIN:$PATH"
+          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
 
-          CROSS_PREFIX="$(basename "$(ls "$TOOLCHAIN_BIN"/*gcc | head -n1)")"
-          CROSS_PREFIX="${CROSS_PREFIX%gcc}"
-
-          export CC="${CROSS_PREFIX}gcc"
-          export CXX="${CROSS_PREFIX}g++"
-          export AR="${CROSS_PREFIX}ar"
-          export AS="${CROSS_PREFIX}as"
-          export LD="${CROSS_PREFIX}ld"
-          export RANLIB="${CROSS_PREFIX}ranlib"
-          export STRIP="${CROSS_PREFIX}strip"
+          export CC=aarch64-linux-musl-gcc
+          export CXX=aarch64-linux-musl-g++
+          export AR=aarch64-linux-musl-ar
+          export AS=aarch64-linux-musl-as
+          export LD=aarch64-linux-musl-ld
+          export RANLIB=aarch64-linux-musl-ranlib
+          export STRIP=aarch64-linux-musl-strip
           export HOSTCC=gcc
 
           cd bash
@@ -73,19 +69,15 @@ jobs:
           set -euxo pipefail
 
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
-          export PATH="$TOOLCHAIN_BIN:$PATH"
+          export PATH="$TOOLCHAIN_DIR/bin:$PATH"
 
-          CROSS_PREFIX="$(basename "$(ls "$TOOLCHAIN_BIN"/*gcc | head -n1)")"
-          CROSS_PREFIX="${CROSS_PREFIX%gcc}"
-
-          export CC="${CROSS_PREFIX}gcc"
-          export CXX="${CROSS_PREFIX}g++"
-          export AR="${CROSS_PREFIX}ar"
-          export AS="${CROSS_PREFIX}as"
-          export LD="${CROSS_PREFIX}ld"
-          export RANLIB="${CROSS_PREFIX}ranlib"
-          export STRIP="${CROSS_PREFIX}strip"
+          export CC=aarch64-linux-musl-gcc
+          export CXX=aarch64-linux-musl-g++
+          export AR=aarch64-linux-musl-ar
+          export AS=aarch64-linux-musl-as
+          export LD=aarch64-linux-musl-ld
+          export RANLIB=aarch64-linux-musl-ranlib
+          export STRIP=aarch64-linux-musl-strip
 
           cd bash
           make -j"$(nproc)" LDFLAGS="-static"
@@ -103,10 +95,7 @@ jobs:
         run: |
           set -euxo pipefail
           TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
-          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
-          CROSS_PREFIX="$(basename "$(ls "$TOOLCHAIN_BIN"/*gcc | head -n1)")"
-          CROSS_PREFIX="${CROSS_PREFIX%gcc}"
-          "$TOOLCHAIN_BIN/${CROSS_PREFIX}strip" bash/bash || true
+          "$TOOLCHAIN_DIR/bin/aarch64-linux-musl-strip" bash/bash || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
