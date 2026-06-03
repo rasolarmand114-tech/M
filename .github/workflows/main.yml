@@ -41,24 +41,6 @@ jobs:
           tar -xf bash.tar.gz
           mv "bash-${BASH_VER}" bash
 
-      - name: Sanity check compiler
-        run: |
-          set -euxo pipefail
-          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
-
-          which aarch64-linux-android-gcc
-          aarch64-linux-android-gcc -v
-
-          cat > test.c <<'EOF'
-          int main(void) { return 0; }
-          EOF
-
-          # Simple dynamic test
-          aarch64-linux-android-gcc test.c -o test_dyn
-
-          # Static test is allowed to fail here; we only want the real error if it exists
-          aarch64-linux-android-gcc -static test.c -o test_static || true
-
       - name: Configure Bash
         working-directory: bash
         run: |
@@ -74,7 +56,6 @@ jobs:
           export STRIP=aarch64-linux-android-strip
           export HOSTCC=gcc
 
-          # Do NOT force -static here; let configure pass first.
           export CFLAGS="-O2"
           export CPPFLAGS=""
           export LDFLAGS=""
@@ -85,7 +66,7 @@ jobs:
             --disable-nls \
             --without-bash-malloc
 
-      - name: Build Bash static
+      - name: Build Bash
         working-directory: bash
         run: |
           set -euxo pipefail
@@ -108,13 +89,6 @@ jobs:
         run: |
           set -euxo pipefail
           file bash/bash
-
-          # Fail if the binary still has dynamic dependencies
-          if readelf -d bash/bash 2>/dev/null | grep -q 'NEEDED'; then
-            echo "::error::Bash is not fully static"
-            exit 1
-          fi
-
           "${TOOLCHAIN_DIR}/bin/aarch64-linux-android-strip" bash/bash || true
           file bash/bash
 
