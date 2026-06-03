@@ -13,9 +13,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    container:
+      image: ghcr.io/cross-rs/aarch64-unknown-linux-musl:main
+
     env:
       BASH_VER: 5.2.37
-      TOOLCHAIN_DIR: ${{ github.workspace }}/aarch64-linux-musl-cross
       CROSS_PREFIX: aarch64-linux-musl-
 
     steps:
@@ -24,18 +26,12 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          apt-get update
+          apt-get install -y \
             git wget file \
             build-essential \
             bison flex texinfo \
             autoconf automake libtool
-
-      - name: Download musl toolchain
-        run: |
-          wget -q https://musl.cc/aarch64-linux-musl-cross.tgz -O toolchain.tgz
-          tar -xf toolchain.tgz
-          echo "${TOOLCHAIN_DIR}/bin" >> "$GITHUB_PATH"
 
       - name: Download Bash source
         run: |
@@ -48,7 +44,6 @@ jobs:
         run: |
           set -euxo pipefail
 
-          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
           export CC="${CROSS_PREFIX}gcc"
           export CXX="${CROSS_PREFIX}g++"
           export AR="${CROSS_PREFIX}ar"
@@ -57,10 +52,6 @@ jobs:
           export RANLIB="${CROSS_PREFIX}ranlib"
           export STRIP="${CROSS_PREFIX}strip"
           export HOSTCC=gcc
-
-          export CFLAGS="-O2"
-          export CPPFLAGS=""
-          export LDFLAGS=""
 
           ./configure \
             --host=aarch64-linux-musl \
@@ -73,7 +64,6 @@ jobs:
         run: |
           set -euxo pipefail
 
-          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
           export CC="${CROSS_PREFIX}gcc"
           export CXX="${CROSS_PREFIX}g++"
           export AR="${CROSS_PREFIX}ar"
@@ -82,10 +72,7 @@ jobs:
           export RANLIB="${CROSS_PREFIX}ranlib"
           export STRIP="${CROSS_PREFIX}strip"
 
-          make -j"$(nproc)" \
-            CFLAGS="-O2" \
-            CPPFLAGS="" \
-            LDFLAGS="-static"
+          make -j"$(nproc)" LDFLAGS="-static"
 
       - name: Verify binary
         run: |
@@ -95,7 +82,7 @@ jobs:
             echo "::error::Bash is not fully static"
             exit 1
           fi
-          "${TOOLCHAIN_DIR}/bin/${CROSS_PREFIX}strip" bash/bash || true
+          strip bash/bash || true
           file bash/bash
 
       - name: Upload artifact
