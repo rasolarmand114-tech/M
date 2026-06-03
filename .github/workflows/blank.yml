@@ -1,10 +1,10 @@
-name: Import Source
+name: Universal Importer
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "tar | zip | git"
+        description: "git | zip | targz | tarbz2 | tarxz | file"
         required: true
         default: "git"
 
@@ -13,44 +13,43 @@ on:
         required: true
 
       branch:
-        description: "Git branch (for git mode)"
+        description: "Git branch"
         required: false
         default: "master"
 
       target_repo:
-        description: "owner/repository"
+        description: "Repository name only"
         required: true
 
       clean:
-        description: "Delete old files"
+        description: "true/false"
         required: true
         default: "true"
+
+permissions:
+  contents: write
 
 jobs:
   import:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout temp
-        uses: actions/checkout@v4
-
-      - name: Prepare
+      - name: Install tools
         run: |
-          mkdir src
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            wget \
+            unzip \
+            rsync \
+            xz-utils \
+            bzip2
 
-      - name: Import TAR
-        if: ${{ inputs.mode == 'tar' }}
+      - name: Prepare workspace
         run: |
-          wget "${{ inputs.source }}" -O archive.tar.gz
-          tar -xf archive.tar.gz -C src
+          mkdir -p src
 
-      - name: Import ZIP
-        if: ${{ inputs.mode == 'zip' }}
-        run: |
-          wget "${{ inputs.source }}" -O archive.zip
-          unzip archive.zip -d src
-
-      - name: Import GIT
+      - name: Import Git
         if: ${{ inputs.mode == 'git' }}
         run: |
           git clone \
@@ -59,42 +58,70 @@ jobs:
             "${{ inputs.source }}" \
             src
 
-      - name: Checkout target repo
+      - name: Import ZIP
+        if: ${{ inputs.mode == 'zip' }}
+        run: |
+          wget -O archive.zip "${{ inputs.source }}"
+          unzip archive.zip -d src
+
+      - name: Import TAR.GZ
+        if: ${{ inputs.mode == 'targz' }}
+        run: |
+          wget -O archive.tar.gz "${{ inputs.source }}"
+          tar -xzf archive.tar.gz -C src
+
+      - name: Import TAR.BZ2
+        if: ${{ inputs.mode == 'tarbz2' }}
+        run: |
+          wget -O archive.tar.bz2 "${{ inputs.source }}"
+          tar -xjf archive.tar.bz2 -C src
+
+      - name: Import TAR.XZ
+        if: ${{ inputs.mode == 'tarxz' }}
+        run: |
+          wget -O archive.tar.xz "${{ inputs.source }}"
+          tar -xJf archive.tar.xz -C src
+
+      - name: Import Single File
+        if: ${{ inputs.mode == 'file' }}
+        run: |
+          wget -P src "${{ inputs.source }}"
+
+      - name: Checkout Target Repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.target_repo }}
-          token: ${{ secrets.TARGET_TOKEN }}
+          repository: ${{ github.repository_owner }}/${{ inputs.target_repo }}
+          token: ${{ secrets.PAT }}
           path: target
 
-      - name: Copy files
+      - name: Clean Repository
+        if: ${{ inputs.clean == 'true' }}
         run: |
-          if [ "${{ inputs.clean }}" = "true" ]; then
-            find target -mindepth 1 -maxdepth 1 \
-              ! -name ".git" \
-              -exec rm -rf {} +
-          fi
+          find target \
+            -mindepth 1 \
+            -maxdepth 1 \
+            ! -name ".git" \
+            -exec rm -rf {} +
 
+      - name: Copy Files
+        run: |
           rsync -a \
             --exclude=.git \
             src/ \
             target/
 
-      - name: Commit
+      - name: Commit and Push
         run: |
           cd target
 
           git config user.name "github-actions[bot]"
-          git config user.email \
-            "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add .
 
           if ! git diff --cached --quiet; then
-            git commit -m \
-              "Import (${{
-                inputs.mode
-              }}) from ${{
-                inputs.source
-              }}"
+            git commit -m "Import from ${{ inputs.source }}"
             git push
+          else
+            echo "No changes"
           fi
