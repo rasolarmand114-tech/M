@@ -1,0 +1,100 @@
+name: Import Source
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "tar | zip | git"
+        required: true
+        default: "git"
+
+      source:
+        description: "Source URL"
+        required: true
+
+      branch:
+        description: "Git branch (for git mode)"
+        required: false
+        default: "master"
+
+      target_repo:
+        description: "owner/repository"
+        required: true
+
+      clean:
+        description: "Delete old files"
+        required: true
+        default: "true"
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout temp
+        uses: actions/checkout@v4
+
+      - name: Prepare
+        run: |
+          mkdir src
+
+      - name: Import TAR
+        if: ${{ inputs.mode == 'tar' }}
+        run: |
+          wget "${{ inputs.source }}" -O archive.tar.gz
+          tar -xf archive.tar.gz -C src
+
+      - name: Import ZIP
+        if: ${{ inputs.mode == 'zip' }}
+        run: |
+          wget "${{ inputs.source }}" -O archive.zip
+          unzip archive.zip -d src
+
+      - name: Import GIT
+        if: ${{ inputs.mode == 'git' }}
+        run: |
+          git clone \
+            --depth 1 \
+            --branch "${{ inputs.branch }}" \
+            "${{ inputs.source }}" \
+            src
+
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.target_repo }}
+          token: ${{ secrets.TARGET_TOKEN }}
+          path: target
+
+      - name: Copy files
+        run: |
+          if [ "${{ inputs.clean }}" = "true" ]; then
+            find target -mindepth 1 -maxdepth 1 \
+              ! -name ".git" \
+              -exec rm -rf {} +
+          fi
+
+          rsync -a \
+            --exclude=.git \
+            src/ \
+            target/
+
+      - name: Commit
+        run: |
+          cd target
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add .
+
+          if ! git diff --cached --quiet; then
+            git commit -m \
+              "Import (${{
+                inputs.mode
+              }}) from ${{
+                inputs.source
+              }}"
+            git push
+          fi
