@@ -1,4 +1,4 @@
-name: Build Bash ARM64 Static
+name: Build Bash ARM64 Static (musl)
 
 on:
   workflow_dispatch:
@@ -15,8 +15,8 @@ jobs:
 
     env:
       BASH_VER: 5.2.37
-      TOOLCHAIN_DIR: ${{ github.workspace }}/google
-      CROSS_PREFIX: aarch64-linux-android-
+      TOOLCHAIN_DIR: ${{ github.workspace }}/aarch64-linux-musl-cross
+      CROSS_PREFIX: aarch64-linux-musl-
 
     steps:
       - name: Checkout
@@ -31,10 +31,11 @@ jobs:
             bison flex texinfo \
             autoconf automake libtool
 
-      - name: Clone Android GCC 4.9 toolchain
+      - name: Download musl toolchain
         run: |
-          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
-          chmod +x google/bin/* || true
+          wget -q https://musl.cc/aarch64-linux-musl-cross.tgz -O toolchain.tgz
+          tar -xf toolchain.tgz
+          echo "${TOOLCHAIN_DIR}/bin" >> "$GITHUB_PATH"
 
       - name: Download Bash source
         run: |
@@ -46,8 +47,8 @@ jobs:
         working-directory: bash
         run: |
           set -euxo pipefail
-          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
 
+          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
           export CC="${CROSS_PREFIX}gcc"
           export CXX="${CROSS_PREFIX}g++"
           export AR="${CROSS_PREFIX}ar"
@@ -62,17 +63,17 @@ jobs:
           export LDFLAGS=""
 
           ./configure \
-            --host=aarch64-linux-android \
-            --build=x86_64-pc-linux-gnu \
+            --host=aarch64-linux-musl \
             --disable-nls \
-            --without-bash-malloc
+            --without-bash-malloc \
+            --enable-static-link
 
       - name: Build Bash
         working-directory: bash
         run: |
           set -euxo pipefail
-          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
 
+          export PATH="${TOOLCHAIN_DIR}/bin:${PATH}"
           export CC="${CROSS_PREFIX}gcc"
           export CXX="${CROSS_PREFIX}g++"
           export AR="${CROSS_PREFIX}ar"
@@ -90,6 +91,10 @@ jobs:
         run: |
           set -euxo pipefail
           file bash/bash
+          if readelf -d bash/bash 2>/dev/null | grep -q 'NEEDED'; then
+            echo "::error::Bash is not fully static"
+            exit 1
+          fi
           "${TOOLCHAIN_DIR}/bin/${CROSS_PREFIX}strip" bash/bash || true
           file bash/bash
 
