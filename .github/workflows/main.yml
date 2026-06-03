@@ -1,4 +1,4 @@
-name: Build Bash ARM64 Static (musl)
+name: Build Bash ARM64 Fully Static
 
 on:
   workflow_dispatch:
@@ -13,12 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
-    container:
-      image: ghcr.io/cross-rs/aarch64-unknown-linux-musl:main
-
     env:
       BASH_VER: 5.2.37
-      CROSS_PREFIX: aarch64-linux-musl-
+      TOOLCHAIN_URL: https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-2025.08-1.tar.xz
 
     steps:
       - name: Checkout
@@ -26,12 +23,17 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          apt-get update
-          apt-get install -y \
+          sudo apt-get update
+          sudo apt-get install -y \
             git wget file \
             build-essential \
             bison flex texinfo \
             autoconf automake libtool
+
+      - name: Download Bootlin musl toolchain
+        run: |
+          wget -q "$TOOLCHAIN_URL" -O toolchain.tar.xz
+          tar -xf toolchain.tar.xz
 
       - name: Download Bash source
         run: |
@@ -40,9 +42,15 @@ jobs:
           mv "bash-${BASH_VER}" bash
 
       - name: Configure Bash
-        working-directory: bash
         run: |
           set -euxo pipefail
+
+          TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
+          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
+          export PATH="$TOOLCHAIN_BIN:$PATH"
+
+          CROSS_PREFIX="$(basename "$(ls "$TOOLCHAIN_BIN"/*gcc | head -n1)")"
+          CROSS_PREFIX="${CROSS_PREFIX%gcc}"
 
           export CC="${CROSS_PREFIX}gcc"
           export CXX="${CROSS_PREFIX}g++"
@@ -53,6 +61,7 @@ jobs:
           export STRIP="${CROSS_PREFIX}strip"
           export HOSTCC=gcc
 
+          cd bash
           ./configure \
             --host=aarch64-linux-musl \
             --disable-nls \
@@ -60,9 +69,15 @@ jobs:
             --enable-static-link
 
       - name: Build Bash
-        working-directory: bash
         run: |
           set -euxo pipefail
+
+          TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
+          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
+          export PATH="$TOOLCHAIN_BIN:$PATH"
+
+          CROSS_PREFIX="$(basename "$(ls "$TOOLCHAIN_BIN"/*gcc | head -n1)")"
+          CROSS_PREFIX="${CROSS_PREFIX%gcc}"
 
           export CC="${CROSS_PREFIX}gcc"
           export CXX="${CROSS_PREFIX}g++"
@@ -72,9 +87,10 @@ jobs:
           export RANLIB="${CROSS_PREFIX}ranlib"
           export STRIP="${CROSS_PREFIX}strip"
 
+          cd bash
           make -j"$(nproc)" LDFLAGS="-static"
 
-      - name: Verify binary
+      - name: Verify static binary
         run: |
           set -euxo pipefail
           file bash/bash
@@ -82,8 +98,15 @@ jobs:
             echo "::error::Bash is not fully static"
             exit 1
           fi
-          strip bash/bash || true
-          file bash/bash
+
+      - name: Strip binary
+        run: |
+          set -euxo pipefail
+          TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
+          TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
+          CROSS_PREFIX="$(basename "$(ls "$TOOLCHAIN_BIN"/*gcc | head -n1)")"
+          CROSS_PREFIX="${CROSS_PREFIX%gcc}"
+          "$TOOLCHAIN_BIN/${CROSS_PREFIX}strip" bash/bash || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
