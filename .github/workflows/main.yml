@@ -30,10 +30,15 @@ jobs:
             bison flex texinfo \
             autoconf automake libtool
 
-      - name: Download musl toolchain
+      - name: Download and extract musl toolchain
         run: |
           wget -q "$TOOLCHAIN_URL" -O toolchain.tar.xz
           tar -xf toolchain.tar.xz
+          ls -la
+          # Find the actual toolchain directory
+          TOOLCHAIN_DIR=$(find . -maxdepth 1 -type d -name 'aarch64*' | head -n1)
+          echo "Toolchain directory: $TOOLCHAIN_DIR"
+          ls -la "$TOOLCHAIN_DIR/bin/" | head -20
 
       - name: Download Bash source
         run: |
@@ -41,34 +46,64 @@ jobs:
           tar -xf bash.tar.gz
           mv "bash-${BASH_VER}" bash
 
-      - name: Build Bash
+      - name: Build Bash with ARM64 cross-compiler
         run: |
           set -euxo pipefail
 
-          TOOLCHAIN_DIR="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*musl*' | head -n1)"
+          # Find the toolchain directory
+          TOOLCHAIN_DIR=$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type d -name 'aarch64*' | head -n1)
+          if [ -z "$TOOLCHAIN_DIR" ]; then
+            echo "::error::Toolchain directory not found!"
+            exit 1
+          fi
+
           TOOLCHAIN_BIN="$TOOLCHAIN_DIR/bin"
+          echo "Using toolchain: $TOOLCHAIN_DIR"
+          echo "Contents of bin directory:"
+          ls -la "$TOOLCHAIN_BIN/" | grep -E 'gcc|cc'
 
-          # پیدا کردن خودِ compiler واقعی از داخل toolchain
-          GCC_BIN="$(find "$TOOLCHAIN_BIN" -maxdepth 1 -type f -name '*gcc' | sort | head -n1)"
-          PREFIX="${GCC_BIN%gcc}"
+          # Extract the cross-compiler prefix (e.g., aarch64-linux-musl)
+          # Look for the actual cross-compiler binary
+          CC_BIN=$(find "$TOOLCHAIN_BIN" -maxdepth 1 -type f -name '*gcc' | head -n1)
+          if [ -z "$CC_BIN" ]; then
+            echo "::error::Cross-compiler gcc not found in toolchain!"
+            exit 1
+          fi
 
+          # Get the prefix by removing '-gcc' from the binary name
+          PREFIX="${CC_BIN%-gcc}"
+          PREFIX="${PREFIX##*/}"  # Get just the filename
+          
+          echo "Cross-compiler prefix: $PREFIX"
+          echo "Full gcc path: $CC_BIN"
+
+          # Set up cross-compilation environment
           export PATH="$TOOLCHAIN_BIN:$PATH"
-          export CC="${PREFIX}gcc"
-          export CXX="${PREFIX}g++"
-          export AR="${PREFIX}ar"
-          export AS="${PREFIX}as"
-          export LD="${PREFIX}ld"
-          export RANLIB="${PREFIX}ranlib"
-          export STRIP="${PREFIX}strip"
+          export CC="${PREFIX}-gcc"
+          export CXX="${PREFIX}-g++"
+          export AR="${PREFIX}-ar"
+          export AS="${PREFIX}-as"
+          export LD="${PREFIX}-ld"
+          export RANLIB="${PREFIX}-ranlib"
+          export STRIP="${PREFIX}-strip"
           export HOSTCC=gcc
 
-          # host triple را از خود compiler بگیر تا configure روی x86_64 برنگردد
-          HOST_TRIPLE="$($CC -dumpmachine)"
-          echo "Using CC=$CC"
-          echo "Using HOST_TRIPLE=$HOST_TRIPLE"
+          # Verify the compiler works
+          echo "Testing compiler:"
           $CC --version
+          $CC -dumpmachine
+
+          # Get the host triple directly (this is the target for cross-compilation)
+          HOST_TRIPLE=$($CC -dumpmachine)
+          echo "Target architecture (HOST_TRIPLE): $HOST_TRIPLE"
+
+          # Additional flags for musl static linking
+          export CFLAGS="-static -O2"
+          export LDFLAGS="-static"
 
           cd bash
+
+          # Configure for cross-compilation
           ./configure \
             --host="$HOST_TRIPLE" \
             --disable-nls \
@@ -76,18 +111,31 @@ jobs:
             --enable-static-link \
             --enable-largefile \
             --enable-alias \
-            --enable-history
+            --enable-history \
+            CC="$CC" \
+            CXX="$CXX" \
+            AR="$AR" \
+            RANLIB="$RANLIB"
 
-          make -j"$(nproc)" LDFLAGS="-static"
+          # Build with proper linker flags
+          make -j"$(nproc)" LDFLAGS="-static" CC="$CC"
 
+          # Verify the binary
+          echo "=== Binary verification ==="
+          ls -lh bash
           file bash
           readelf -h bash | grep Machine
+
+          # Check for dynamic dependencies
           if readelf -d bash 2>/dev/null | grep -q 'NEEDED'; then
-            echo "::error::Bash is not fully static"
+            echo "::error::Bash contains dynamic library dependencies!"
+            readelf -d bash | grep NEEDED
             exit 1
           fi
 
-          "${STRIP}" -s bash || true
+          # Strip if possible
+          $STRIP -s bash || true
+          ls -lh bash
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
