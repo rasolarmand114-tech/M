@@ -39,7 +39,7 @@ jobs:
         run: |
           TOOLCHAIN_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.0/clang+llvm-18.1.0-aarch64-linux-gnu.tar.xz"
           echo "Downloading toolchain..."
-          wget -q --show-progress "$TOOLCHAIN_URL" -O clang-llvm.tar.xz
+          curl -L "$TOOLCHAIN_URL" -O clang-llvm.tar.xz
           mkdir -p "$HOME/toolchain/clang"
           tar -xf clang-llvm.tar.xz -C "$HOME/toolchain/clang" --strip-components=1
           echo "$HOME/toolchain/clang/bin" >> "$GITHUB_PATH"
