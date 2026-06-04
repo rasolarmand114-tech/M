@@ -25,14 +25,27 @@ jobs:
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
 
-      - name: Install dependencies and LLVM/Clang
+      - name: Install dependencies
         run: |
           sudo apt update -y
           sudo apt install -y \
             bc bison flex git wget curl tar \
             cpio perl python-is-python3 \
             libssl-dev lz4 \
-            clang lld llvm
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+
+      - name: Download LLVM/Clang 18.1.0 toolchain
+        run: |
+          TOOLCHAIN_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.0/clang+llvm-18.1.0-aarch64-linux-gnu.tar.xz"
+          echo "Downloading toolchain..."
+          wget -q --show-progress "$TOOLCHAIN_URL" -O clang-llvm.tar.xz
+          mkdir -p "$HOME/toolchain/clang"
+          tar -xf clang-llvm.tar.xz -C "$HOME/toolchain/clang" --strip-components=1
+          echo "$HOME/toolchain/clang/bin" >> "$GITHUB_PATH"
+          echo "Toolchain installed:"
+          "$HOME/toolchain/clang/bin/clang" --version
+          "$HOME/toolchain/clang/bin/ld.lld" --version
 
       - name: Prepare swap
         run: |
@@ -53,8 +66,6 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
-          export PATH=/usr/lib/llvm-18/bin:$PATH
-
           export ARCH=arm64
           export SUBARCH=arm64
           export PLATFORM_VERSION=13
@@ -88,7 +99,7 @@ jobs:
 
           mkdir -p aout
 
-          echo "Compiler:"
+          echo "=== Compiler Info ==="
           clang --version
           ld.lld --version
 
@@ -97,22 +108,23 @@ jobs:
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/exlinux_defconfig
           fi
 
-          make -j32 O=aout ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-            HOSTCC=clang HOSTCXX=clang++ HOSTAR=llvm-ar HOSTLD=ld.lld \
-            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 exlinux_defconfig
+          MAKE_ARGS="O=aout ARCH=arm64
+            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
+            HOSTCC=clang HOSTCXX=clang++ HOSTAR=llvm-ar HOSTLD=ld.lld
+            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1"
 
-          make -j32 O=aout ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm \
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
-            HOSTCC=clang HOSTCXX=clang++ HOSTAR=llvm-ar HOSTLD=ld.lld \
-            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 \
-            Image.gz dtbs
+          echo "=== Loading defconfig ==="
+          make -j$(nproc) $MAKE_ARGS exlinux_defconfig
+
+          echo "=== Building kernel ==="
+          make -j$(nproc) $MAKE_ARGS Image.gz dtbs
 
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="$(make -s O=aout ARCH=arm64 kernelversion)-A12s_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
-          echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
+          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
+          echo "Build: $buildDetails"
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
