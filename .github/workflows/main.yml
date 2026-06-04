@@ -15,7 +15,7 @@ jobs:
 
     env:
       BASH_VER: 5.2.37
-      TOOLCHAIN_URL: https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-2025.08-1.tar.xz
+      TOOLCHAIN_URL: TOOLCHAIN_URL: https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--musl--stable-2023.11-1.tar.xz
 
     steps:
       - name: Checkout
