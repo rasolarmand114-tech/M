@@ -1,179 +1,177 @@
 name: Build Kernel
 
 on:
-  workflow_dispatch:
-    inputs:
-      BRANCH:
-        description: Kernel branch
-        default: "main"
-        required: true
-      SELINUX_PERMISSIVE:
-        description: Permissive SELinux
-        type: boolean
+workflow_dispatch:
+inputs:
+BRANCH:
+description: Kernel branch
+default: "main"
+required: true
+SELINUX_PERMISSIVE:
+description: Permissive SELinux
+type: boolean
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+build:
+runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout Kernel Source
-        uses: actions/checkout@v4
-        with:
-          repository: rasolarmand114-tech/exlinux
-          path: kernel_root
-          ref: ${{ github.event.inputs.BRANCH }}
-          fetch-depth: 0
+steps:
+  - name: Checkout Kernel Source
+    uses: actions/checkout@v4
+    with:
+      repository: rasolarmand114-tech/exlinux
+      path: kernel_root
+      ref: ${{ github.event.inputs.BRANCH }}
+      fetch-depth: 0
 
-      - name: Prepare dependencies + fetch tags
-        working-directory: kernel_root
-        run: |
-          sudo apt update -y
-          sudo apt install -y \
-            bc cpio flex bison git python-is-python3 \
-            tar perl wget curl lz4 libssl-dev \
-            libclang-dev libelf-dev llvm-dev
+  - name: Prepare dependencies + fetch tags
+    working-directory: kernel_root
+    run: |
+      sudo apt update -y
+      sudo apt install -y \
+        bc cpio flex bison git python-is-python3 \
+        tar perl wget curl lz4 libssl-dev \
+        libclang-dev libelf-dev llvm-dev
 
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --tags --force
+      git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      git fetch --tags --force
 
-      - name: Recreate 12GB Swap
-        run: |
-          sudo swapoff -a || true
-          sudo rm -f /swapfile
-          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+  - name: Recreate 12GB Swap
+    run: |
+      sudo swapoff -a || true
+      sudo rm -f /swapfile
+      sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+      sudo chmod 600 /swapfile
+      sudo mkswap /swapfile
+      sudo swapon /swapfile
+      free -h
 
-      - name: Fetch toolchains (Clang 11 + GCC 4.9)
-        working-directory: kernel_root
-        run: |
-          mkdir -p toolchains
-          cd toolchains
+  - name: Fetch toolchains (Clang 11 + GCC 4.9)
+    working-directory: kernel_root
+    run: |
+      mkdir -p toolchains
+      cd toolchains
 
-          git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
-          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
+      git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
+      git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
 
-      - name: Remove pre-installed Rust
-        run: |
-          rustup self uninstall -y 2>/dev/null || true
+  - name: Remove pre-installed Rust
+    run: |
+      rustup self uninstall -y 2>/dev/null || true
 
-          sudo rm -rf \
-            "$HOME/.cargo" \
-            "$HOME/.rustup" \
-            /usr/share/rust \
-            /usr/local/cargo \
-            /usr/local/rustup
+      sudo rm -rf \
+        "$HOME/.cargo" \
+        "$HOME/.rustup" \
+        /usr/share/rust \
+        /usr/local/cargo \
+        /usr/local/rustup
 
-          sudo rm -f \
-            /usr/local/bin/rustup \
-            /usr/local/bin/rustc \
-            /usr/local/bin/cargo \
-            /usr/bin/rustup \
-            /usr/bin/rustc \
-            /usr/bin/cargo
+      sudo rm -f \
+        /usr/local/bin/rustup \
+        /usr/local/bin/rustc \
+        /usr/local/bin/cargo \
+        /usr/bin/rustup \
+        /usr/bin/rustc \
+        /usr/bin/cargo
 
-          which rustc || echo "rustc clean"
-          which cargo || echo "cargo clean"
-          which rustup || echo "rustup clean"
+      which rustc || echo "rustc clean"
+      which cargo || echo "cargo clean"
+      which rustup || echo "rustup clean"
 
-      - name: Install Rust toolchain
-        run: |
-          CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
+  - name: Install Rust toolchain
+    run: |
+      CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
 
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-            --profile minimal \
-            --default-toolchain none
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+        --profile minimal \
+        --default-toolchain none
 
-          source "$HOME/.cargo/env"
+      source "$HOME/.cargo/env"
 
-          rustup toolchain install nightly-2024-02-01
-          rustup component add rust-src --toolchain nightly-2024-02-01
-          rustup component add rustfmt --toolchain nightly-2024-02-01
-          rustup target add aarch64-unknown-none --toolchain nightly-2024-02-01
-          cargo +nightly-2024-02-01 install bindgen-cli --locked
+      rustup toolchain install nightly-2024-02-01
+      rustup component add rust-src --toolchain nightly-2024-02-01
+      rustup component add rustfmt --toolchain nightly-2024-02-01
+      rustup target add aarch64-unknown-none --toolchain nightly-2024-02-01
+      cargo +nightly-2024-02-01 install bindgen-cli --locked
 
-          mkdir -p "$HOME/.cargo"
+      mkdir -p "$HOME/.cargo"
 
-          cat > "$HOME/.cargo/config.toml" << EOF
-          [target.aarch64-unknown-none]
-          linker = "${CLANG_BIN}/clang"
-          ar = "${CLANG_BIN}/llvm-ar"
-          EOF
+      cat > "$HOME/.cargo/config.toml" << EOF
+      [target.aarch64-unknown-none]
+      linker = "${CLANG_BIN}/clang"
+      ar = "${CLANG_BIN}/llvm-ar"
+      EOF
 
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-          echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
-          echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01" >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
-          echo "LIBCLANG_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
+      echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
+      echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+      echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01" >> "$GITHUB_ENV"
+      echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
+      echo "LIBCLANG_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
 
-          rustc +nightly-2024-02-01 --version
-          cargo +nightly-2024-02-01 --version
-          bindgen --version
+      rustc +nightly-2024-02-01 --version
+      cargo +nightly-2024-02-01 --version
+      bindgen --version
 
-      - name: Set timezone
-        run: |
-          sudo rm -f /etc/localtime
-          sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+  - name: Set timezone
+    run: |
+      sudo rm -f /etc/localtime
+      sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      - name: Build kernel
-        id: buildKernel
-        working-directory: kernel_root
-        run: |
-          echo "CONFIG_SCHED_ARG=y" >> arch/arm64/configs/exlinux_defconfig
-          echo "CONFIG_SCHED_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
+  - name: Build kernel
+    id: buildKernel
+    working-directory: kernel_root
+    run: |
+      echo "CONFIG_SCHED_ARG=y" >> arch/arm64/configs/exlinux_defconfig
+      echo "CONFIG_SCHED_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
 
-          export PATH=$(pwd)/toolchains/clang/bin:$PATH
-          export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          export RUSTUP_TOOLCHAIN=nightly-2024-02-01
-          export RUSTC="$HOME/.cargo/bin/rustc"
-          export CARGO="$HOME/.cargo/bin/cargo"
-          export RUST_LIB_SRC="$(rustc +nightly-2024-02-01 --print sysroot)/lib/rustlib/src/rust/library"
-          export KBUILD_BUILD_USER=exlinux
-          export KBUILD_BUILD_HOST=github
-          export BUILD_START=$(date)
-          export IS_CI=true
+      export PATH=$(pwd)/toolchains/clang/bin:$PATH
+      export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
+      export CLANG_TRIPLE=aarch64-linux-gnu-
+      export RUSTUP_TOOLCHAIN=nightly-2024-02-01
+      export RUSTC="$HOME/.cargo/bin/rustc"
+      export CARGO="$HOME/.cargo/bin/cargo"
+      export RUST_LIB_SRC="$(rustc +nightly-2024-02-01 --print sysroot)/lib/rustlib/src/rust/library"
+      export KBUILD_BUILD_USER=exlinux
+      export KBUILD_BUILD_HOST=github
+      export BUILD_START=$(date)
+      export IS_CI=true
 
-          export DEFCONFIG=exlinux_defconfig
-          export DEVICE_ID=A12s
-          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/exlinux
+      export DEFCONFIG=exlinux_defconfig
+      export DEVICE_ID=A12s
+      export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/exlinux
 
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
-            SELINUX_STATE="Permissive"
-          else
-            SELINUX_STATE="Enforcing"
-          fi
+      if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
+        echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+        SELINUX_STATE="Permissive"
+      else
+        SELINUX_STATE="Enforcing"
+      fi
 
-          echo "SELinux is set to: $SELINUX_STATE"
+      echo "SELinux is set to: $SELINUX_STATE"
 
-          bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+      bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
-          mv .config build_config.txt
+      mv .config build_config.txt
 
-          gitsha1=$(git rev-parse --short HEAD)
-          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+      gitsha1=$(git rev-parse --short HEAD)
+      buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
 
-          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
-    
-      - name: Build module 
-        id:  module 
-        working-directory: kernel_root
-        run: |
-        
-         make ARCH=arm64 M=arg V=1 modules
-      
-      - name: Upload kernel images
-        uses: actions/upload-artifact@v4
-        with:
-          name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
-          path: |
-            kernel_root/arch/arm64/boot/Image.gz
-            kernel_root/arch/arm64/boot/dts/exynos/*.dtb
-            kernel_root/arch/arm64/boot/dts/samsung/*.dtb
-            kernel_root/arg/*.ko
-            
+      echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
+
+  - name: Build module
+    id: module
+    working-directory: kernel_root
+    run: |
+      make ARCH=arm64 $(nproc --all) modules 
+
+  - name: Upload kernel images
+    uses: actions/upload-artifact@v4
+    with:
+      name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+      path: |
+        kernel_root/arch/arm64/boot/Image
+        kernel_root/arch/arm64/boot/dts/exynos/*.dtb
+        kernel_root/arch/arm64/boot/dts/samsung/*.dtb
+        kernel_root/arg/*.ko
