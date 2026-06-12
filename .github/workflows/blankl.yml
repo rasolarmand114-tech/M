@@ -89,16 +89,9 @@ jobs:
           source "$HOME/.cargo/env"
 
           rustup toolchain install nightly-2024-02-01
-
-          rustup component add rust-src \
-            --toolchain nightly-2024-02-01
-
-          rustup component add rustfmt \
-            --toolchain nightly-2024-02-01
-
-          rustup target add aarch64-unknown-none \
-            --toolchain nightly-2024-02-01
-
+          rustup component add rust-src --toolchain nightly-2024-02-01
+          rustup component add rustfmt --toolchain nightly-2024-02-01
+          rustup target add aarch64-unknown-none --toolchain nightly-2024-02-01
           cargo +nightly-2024-02-01 install bindgen-cli --locked
 
           mkdir -p "$HOME/.cargo"
@@ -125,12 +118,13 @@ jobs:
         run: |
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
         run: |
-          echo "CONFIG_SCHAD_ARG=y" >> arch/arm64/configs/exlinux_defconfig
-          echo "CONFIG_SCHAD_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
+          echo "CONFIG_SCHED_ARG=y" >> arch/arm64/configs/exlinux_defconfig
+          echo "CONFIG_SCHED_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
 
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
@@ -138,15 +132,11 @@ jobs:
           export RUSTUP_TOOLCHAIN=nightly-2024-02-01
           export RUSTC="$HOME/.cargo/bin/rustc"
           export CARGO="$HOME/.cargo/bin/cargo"
-          export RUST_LIB_SRC="$(
-          rustc +nightly-2024-02-01 --print sysroot
-          )/lib/rustlib/src/rust/library"
+          export RUST_LIB_SRC="$(rustc +nightly-2024-02-01 --print sysroot)/lib/rustlib/src/rust/library"
           export KBUILD_BUILD_USER=exlinux
           export KBUILD_BUILD_HOST=github
           export BUILD_START=$(date)
           export IS_CI=true
-
-          export RUST_LIB_SRC="$(rustc +nightly-2024-02-01 --print sysroot)/lib/rustlib/src/rust/library"
 
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
@@ -178,3 +168,19 @@ jobs:
             kernel_root/arch/arm64/boot/Image.gz
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
+
+      - name: Upload ARG Scheduler Module
+        uses: actions/upload-artifact@v4
+        with:
+          name: ARG-Module-${{ steps.buildKernel.outputs.buildDetails }}
+          path: |
+            kernel_root/arg/arg_core.ko
+            kernel_root/arg/*.o
+            kernel_root/kernel/sched/arg_hook.o
+
+      - name: Upload build config
+        uses: actions/upload-artifact@v4
+        with:
+          name: Config-${{ steps.buildKernel.outputs.buildDetails }}
+          path: |
+            kernel_root/build_config.txt
