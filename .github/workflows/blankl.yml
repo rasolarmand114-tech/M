@@ -10,7 +10,6 @@ on:
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
         type: boolean
-        default: false
 
 jobs:
   build:
@@ -25,29 +24,19 @@ jobs:
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
 
-      - name: Install dependencies
+      - name: Prepare dependencies + fetch tags
+        working-directory: kernel_root
         run: |
           sudo apt update -y
           sudo apt install -y \
-            bc bison flex git wget curl tar \
-            cpio perl python-is-python3 \
-            libssl-dev lz4 \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+            bc cpio flex bison git python-is-python3 \
+            tar perl wget curl lz4 libssl-dev \
+            libclang-dev llvm-dev
 
-      - name: Download LLVM/Clang 18.1.0 toolchain
-        run: |
-          TOOLCHAIN_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-18.1.0/clang+llvm-18.1.0-aarch64-linux-gnu.tar.xz"
-          echo "Downloading toolchain..."
-          curl -L "$TOOLCHAIN_URL" -O clang-llvm.tar.xz
-          mkdir -p "$HOME/toolchain/clang"
-          tar -xf clang-llvm.tar.xz -C "$HOME/toolchain/clang" --strip-components=1
-          echo "$HOME/toolchain/clang/bin" >> "$GITHUB_PATH"
-          echo "Toolchain installed:"
-          "$HOME/toolchain/clang/bin/clang" --version
-          "$HOME/toolchain/clang/bin/ld.lld" --version
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --tags --force
 
-      - name: Prepare swap
+      - name: Recreate 12GB Swap
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
@@ -57,80 +46,108 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      - name: Set timezone
+      - name: Fetch toolchains (Clang 11 + GCC 4.9)
+        working-directory: kernel_root
         run: |
-          sudo rm -f /etc/localtime
+          mkdir toolchains && cd toolchains
+          git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
+          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
+
+      - name: Install Rust toolchain (aarch64-unknown-none)
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+            --default-toolchain stable \
+            --profile minimal
+
+          source "$HOME/.cargo/env"
+
+          # Add the bare-metal aarch64 target for kernel compilation
+          rustup target add aarch64-unknown-none
+
+          # rust-src is required by the kernel build system (RUST_LIB_SRC)
+          rustup component add rust-src rustfmt
+
+          # bindgen is required to generate Rust bindings from C headers
+          cargo install bindgen-cli --locked
+
+          # Persist env for all subsequent steps
+          echo "$HOME/.cargo/bin"    >> "$GITHUB_PATH"
+          echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$HOME/.cargo"   >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
+
+          # Verify
+          rustc --version
+          cargo --version
+          bindgen --version
+
+      - name: Set timezone (Asia/Kolkata)
+        run: |
+          sudo rm /etc/localtime
           sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      - name: Build kernel with pure Clang/LLVM
+      - name: Fetch and apply patch (0001-schad-arg-hook)
+        working-directory: kernel_root
+        run: |
+          PATCH_FILE="0001-schad-arg-hook.patch"
+          PATCH_REPO="https://raw.githubusercontent.com/rasolarmand114-tech/Patch"
+
+          echo "Downloading patch..."
+          # Try main branch first, fall back to master
+          curl -fsSL "${PATCH_REPO}/main/${PATCH_FILE}"   -o "${PATCH_FILE}" \
+          || curl -fsSL "${PATCH_REPO}/master/${PATCH_FILE}" -o "${PATCH_FILE}"
+
+          echo "Verifying patch..."
+          head -5 "${PATCH_FILE}"
+
+          echo "Applying patch..."
+          git apply --whitespace=fix "${PATCH_FILE}"
+
+          echo "Patch applied successfully."
+          rm -f "${PATCH_FILE}"
+
+      - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
         run: |
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export PLATFORM_VERSION=13
-          export ANDROID_MAJOR_VERSION=t
-          export KCFLAGS=-w
-          export CONFIG_SECTION_MISMATCH_WARN_ONLY=y
-
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export LLVM=1
-          export LLVM_IAS=1
-
-          export CC=clang
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
-
-          export HOSTCC=clang
-          export HOSTCXX=clang++
-          export HOSTAR=llvm-ar
-          export HOSTLD=ld.lld
-
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
+          export BUILD_START=$(date)
           export IS_CI=true
 
-          mkdir -p aout
+          # Rust environment for the kernel build system
+          export RUST_LIB_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
 
-          echo "=== Compiler Info ==="
-          clang --version
-          ld.lld --version
+          export DEFCONFIG="exlinux_defconfig"
+          export DEVICE_ID="A12s"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
             echo "Switching SELinux to Permissive mode..."
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/exlinux_defconfig
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+            grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
+            SELINUX_STATE="Permissive"
+          else
+            SELINUX_STATE="Enforcing"
           fi
 
-          MAKE_ARGS="O=aout ARCH=arm64
-            CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm
-            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip
-            HOSTCC=clang HOSTCXX=clang++ HOSTAR=llvm-ar HOSTLD=ld.lld
-            CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
-            CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1"
+          echo "SELinux is set to: $SELINUX_STATE"
 
-          echo "=== Loading defconfig ==="
-          make -j$(nproc) $MAKE_ARGS exlinux_defconfig
+          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
-          echo "=== Building kernel ==="
-          make -j$(nproc) $MAKE_ARGS Image.gz dtbs
-
+          mv .config build_config.txt
           gitsha1=$(git rev-parse --short HEAD)
-          buildDetails="$(make -s O=aout ARCH=arm64 kernelversion)-A12s_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+          buildDetails="$(make kernelversion)-$(echo $DEVICE_ID)_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
-          echo "Build: $buildDetails"
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
           path: |
-            kernel_root/aout/arch/arm64/boot/Image.gz
-            kernel_root/aout/arch/arm64/boot/dts/exynos/*.dtb
-            kernel_root/aout/arch/arm64/boot/dts/samsung/*.dtb
+            kernel_root/arch/arm64/boot/Image.gz
+            kernel_root/arch/arm64/boot/dts/exynos/*.dtb
+            kernel_root/arch/arm64/boot/dts/samsung/*.dtb
