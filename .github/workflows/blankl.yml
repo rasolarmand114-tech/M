@@ -125,31 +125,6 @@ jobs:
         run: |
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
-
-      - name: Fetch and apply patch
-        working-directory: kernel_root
-        run: |
-          set -e
-
-          PATCH_FILE="0001-schad-arg-hook.patch"
-          PATCH_URL="https://raw.githubusercontent.com/rasolarmand114-tech/Patch/main/${PATCH_FILE}"
-
-          echo "Downloading patch..."
-          curl -L --fail "$PATCH_URL" -o "$PATCH_FILE"
-
-          echo "Patch header:"
-          head -10 "$PATCH_FILE"
-
-          echo "Checking patch..."
-          git apply --check "$PATCH_FILE"
-
-          echo "Applying patch..."
-          git apply --whitespace=fix "$PATCH_FILE"
-
-          rm -f "$PATCH_FILE"
-
-          echo "Patch applied successfully."
-
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
