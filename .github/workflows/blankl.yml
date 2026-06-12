@@ -31,7 +31,7 @@ jobs:
           sudo apt install -y \
             bc cpio flex bison git python-is-python3 \
             tar perl wget curl lz4 libssl-dev \
-            libclang-dev llvm-dev
+            libclang-dev libelf-dev llvm-dev
 
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
@@ -83,34 +83,42 @@ jobs:
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
 
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-            --default-toolchain stable \
             --profile minimal
 
           source "$HOME/.cargo/env"
 
-          rustup target add aarch64-unknown-linux-gnu
-          rustup component add rust-src rustfmt
+          rustup toolchain install nightly-2024-02-01
 
-          LIBCLANG_PATH="$CLANG_BIN" cargo install bindgen-cli --locked
+          rustup component add rust-src \
+            --toolchain nightly-2024-02-01
+
+          rustup component add rustfmt \
+            --toolchain nightly-2024-02-01
+
+          rustup target add aarch64-unknown-none \
+            --toolchain nightly-2024-02-01
+
+          cargo +nightly-2024-02-01 install bindgen-cli --locked
 
           mkdir -p "$HOME/.cargo"
 
-          cat >> "$HOME/.cargo/config.toml" << EOF
-          [target.aarch64-unknown-linux-gnu]
+          cat > "$HOME/.cargo/config.toml" << EOF
+          [target.aarch64-unknown-none]
           linker = "${CLANG_BIN}/clang"
           ar = "${CLANG_BIN}/llvm-ar"
-          rustflags = [
-            "-C", "linker-flavor=ld.lld",
-            "-C", "link-arg=--target=aarch64-linux-gnu"
-          ]
+
+          [build]
+          target = "aarch64-unknown-none"
           EOF
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
           echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
           echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-linux-gnu" >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
+
+          rustup default nightly-2024-02-01
 
           rustc --version
           cargo --version
@@ -149,15 +157,19 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
+          echo "CONFIG_SCHAD_ARG=y" >> arch/arm64/configs/exynos850_defconfig
+          echo "CONFIG_SCHAD_ARG_KMM=m" >> arch/arm64/configs/exynos850_defconfig
+
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
+          export RUSTC="$HOME/.cargo/bin/rustc"
           export KBUILD_BUILD_USER=exlinux
           export KBUILD_BUILD_HOST=github
           export BUILD_START=$(date)
           export IS_CI=true
 
-          export RUST_LIB_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
+          export RUST_LIB_SRC="$(rustc +nightly-2024-02-01 --print sysroot)/lib/rustlib/src/rust/library"
 
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
