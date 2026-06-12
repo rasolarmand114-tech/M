@@ -159,7 +159,14 @@ jobs:
           buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
-
+    
+      - name: Build module 
+        id:  module 
+        working-directory: kernel_root
+        run: |
+        
+         make ARCH=arm64 M=arg V=1 modules
+      
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
