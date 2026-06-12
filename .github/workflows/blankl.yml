@@ -53,33 +53,42 @@ jobs:
           git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
           git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
 
-      - name: Install Rust toolchain (aarch64-unknown-none)
+      # ── فقط این مرحله تغییر کرده ──────────────────────────────────────────────
+      - name: Install Rust toolchain (aarch64-unknown-linux-gnu)
         run: |
+          CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
+
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
             --default-toolchain stable \
             --profile minimal
-
           source "$HOME/.cargo/env"
 
-          # Add the bare-metal aarch64 target for kernel compilation
-          rustup target add aarch64-unknown-none
-
-          # rust-src is required by the kernel build system (RUST_LIB_SRC)
+          # تارگت صحیح برای کراس‌کامپایل Linux روی ARM64
+          rustup target add aarch64-unknown-linux-gnu
           rustup component add rust-src rustfmt
 
-          # bindgen is required to generate Rust bindings from C headers
-          cargo install bindgen-cli --locked
+          # bindgen با همان Clang 11 که قبلاً دانلود شده
+          LIBCLANG_PATH="$CLANG_BIN" cargo install bindgen-cli --locked
 
-          # Persist env for all subsequent steps
-          echo "$HOME/.cargo/bin"    >> "$GITHUB_PATH"
-          echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$HOME/.cargo"   >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
+          # کراس‌کامپایلر: Clang 11 از toolchain موجود — بدون دانلود جدید
+          mkdir -p "$HOME/.cargo"
+          {
+            echo '[target.aarch64-unknown-linux-gnu]'
+            echo "linker = \"${CLANG_BIN}/clang\""
+            echo "ar     = \"${CLANG_BIN}/llvm-ar\""
+            echo 'rustflags = ["-C", "linker-flavor=ld.lld", "-C", "link-arg=--target=aarch64-linux-gnu"]'
+          } >> "$HOME/.cargo/config.toml"
 
-          # Verify
+          echo "$HOME/.cargo/bin"                        >> "$GITHUB_PATH"
+          echo "RUSTUP_HOME=$HOME/.rustup"                >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$HOME/.cargo"                  >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-unknown-linux-gnu"    >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=${CLANG_BIN}"               >> "$GITHUB_ENV"
+
           rustc --version
           cargo --version
           bindgen --version
+      # ──────────────────────────────────────────────────────────────────────────
 
       - name: Set timezone (Asia/Kolkata)
         run: |
@@ -93,7 +102,6 @@ jobs:
           PATCH_REPO="https://raw.githubusercontent.com/rasolarmand114-tech/Patch"
 
           echo "Downloading patch..."
-          # Try main branch first, fall back to master
           curl -fsSL "${PATCH_REPO}/main/${PATCH_FILE}"   -o "${PATCH_FILE}" \
           || curl -fsSL "${PATCH_REPO}/master/${PATCH_FILE}" -o "${PATCH_FILE}"
 
@@ -118,7 +126,6 @@ jobs:
           export BUILD_START=$(date)
           export IS_CI=true
 
-          # Rust environment for the kernel build system
           export RUST_LIB_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
 
           export DEFCONFIG="exlinux_defconfig"
