@@ -83,7 +83,8 @@ jobs:
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
 
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-            --profile minimal
+            --profile minimal \
+            --default-toolchain none
 
           source "$HOME/.cargo/env"
 
@@ -106,22 +107,18 @@ jobs:
           [target.aarch64-unknown-none]
           linker = "${CLANG_BIN}/clang"
           ar = "${CLANG_BIN}/llvm-ar"
-
-          [build]
-          target = "aarch64-unknown-none"
           EOF
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
           echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
           echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01" >> "$GITHUB_ENV"
           echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
 
-          rustup default nightly-2024-02-01
-
-          rustc --version
-          cargo --version
+          rustc +nightly-2024-02-01 --version
+          cargo +nightly-2024-02-01 --version
           bindgen --version
 
       - name: Set timezone
@@ -157,13 +154,18 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
-          echo "CONFIG_SCHAD_ARG=y" >> arch/arm64/configs/exynos850_defconfig
-          echo "CONFIG_SCHAD_ARG_KMM=m" >> arch/arm64/configs/exynos850_defconfig
+          echo "CONFIG_SCHAD_ARG=y" >> arch/arm64/configs/exlinux_defconfig
+          echo "CONFIG_SCHAD_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
 
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
+          export RUSTUP_TOOLCHAIN=nightly-2024-02-01
           export RUSTC="$HOME/.cargo/bin/rustc"
+          export CARGO="$HOME/.cargo/bin/cargo"
+          export RUST_LIB_SRC="$(
+          rustc +nightly-2024-02-01 --print sysroot
+          )/lib/rustlib/src/rust/library"
           export KBUILD_BUILD_USER=exlinux
           export KBUILD_BUILD_HOST=github
           export BUILD_START=$(date)
