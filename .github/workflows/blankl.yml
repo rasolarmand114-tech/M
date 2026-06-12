@@ -160,12 +160,7 @@ jobs:
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
-      - name: Build module
-        id: module
-        working-directory: kernel_root
-        run: |
-          make ARCH=arm64 -j$(nproc --all) modules
-
+      
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
