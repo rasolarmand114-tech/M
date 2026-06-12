@@ -27,6 +27,7 @@ jobs:
       - name: Prepare dependencies + fetch tags
         working-directory: kernel_root
         run: |
+          set -e
           sudo apt update -y
           sudo apt install -y \
             bc cpio flex bison git python-is-python3 \
@@ -38,6 +39,7 @@ jobs:
 
       - name: Recreate 12GB Swap
         run: |
+          set -e
           sudo swapoff -a || true
           sudo rm -f /swapfile
           sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
@@ -49,6 +51,7 @@ jobs:
       - name: Fetch toolchains (Clang 11 + GCC 4.9)
         working-directory: kernel_root
         run: |
+          set -e
           mkdir -p toolchains
           cd toolchains
 
@@ -57,6 +60,7 @@ jobs:
 
       - name: Remove pre-installed Rust
         run: |
+          set -e
           rustup self uninstall -y 2>/dev/null || true
 
           sudo rm -rf \
@@ -80,6 +84,7 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
+          set -e
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
 
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
@@ -116,6 +121,7 @@ jobs:
 
       - name: Set timezone
         run: |
+          set -e
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
@@ -123,6 +129,8 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
+          set -e
+
           echo "CONFIG_SCHED_ARG=y" >> arch/arm64/configs/exlinux_defconfig
           echo "CONFIG_SCHED_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
 
@@ -138,9 +146,9 @@ jobs:
           export BUILD_START=$(date)
           export IS_CI=true
 
-          export DEFCONFIG=exlinux_defconfig
-          export DEVICE_ID=A12s
-          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/exlinux
+          DEFCONFIG=exlinux_defconfig
+          DEVICE_ID=A12s
+          KERNEL_SOURCE=https://github.com/rasolarmand114-tech/exlinux
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
@@ -153,14 +161,23 @@ jobs:
 
           bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
+          # Build all configured modules (in case script didn't)
+          if grep -q '=m' .config; then
+            make -j$(nproc --all) modules
+          fi
+
+          # Save config for artifact
           mv .config build_config.txt
 
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
-
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
-      - name: Upload kernel images
+          echo "✅ Build finished. Listing output files:"
+          find . -name "*.ko" -type f || true
+          ls -lh arch/arm64/boot/Image.gz || true
+
+      - name: Upload all kernel artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
@@ -168,19 +185,5 @@ jobs:
             kernel_root/arch/arm64/boot/Image.gz
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
-
-      - name: Upload ARG Scheduler Module
-        uses: actions/upload-artifact@v4
-        with:
-          name: ARG-Module-${{ steps.buildKernel.outputs.buildDetails }}
-          path: |
-            kernel_root/arg/arg_core.ko
-            kernel_root/arg/*.o
-            kernel_root/kernel/sched/arg_hook.o
-
-      - name: Upload build config
-        uses: actions/upload-artifact@v4
-        with:
-          name: Config-${{ steps.buildKernel.outputs.buildDetails }}
-          path: |
+            kernel_root/**/*.ko
             kernel_root/build_config.txt
