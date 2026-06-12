@@ -53,7 +53,29 @@ jobs:
           git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
           git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
 
-      # ── فقط این مرحله تغییر کرده ──────────────────────────────────────────────
+      # ── مرحله جدید: پاک کردن Rust از پیش‌نصب‌شده GitHub ─────────────────────
+      - name: Remove pre-installed Rust
+        run: |
+          rustup self uninstall -y 2>/dev/null || true
+
+          sudo rm -rf "$HOME/.cargo"    \
+                      "$HOME/.rustup"   \
+                      /usr/share/rust   \
+                      /usr/local/cargo  \
+                      /usr/local/rustup
+
+          sudo rm -f /usr/local/bin/rustup \
+                     /usr/local/bin/rustc  \
+                     /usr/local/bin/cargo  \
+                     /usr/bin/rustup       \
+                     /usr/bin/rustc        \
+                     /usr/bin/cargo
+
+          which rustc  && echo "WARNING: rustc still present"  || echo "rustc  clean"
+          which cargo  && echo "WARNING: cargo still present"  || echo "cargo  clean"
+          which rustup && echo "WARNING: rustup still present" || echo "rustup clean"
+      # ──────────────────────────────────────────────────────────────────────────
+
       - name: Install Rust toolchain (aarch64-unknown-linux-gnu)
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
@@ -63,14 +85,11 @@ jobs:
             --profile minimal
           source "$HOME/.cargo/env"
 
-          # تارگت صحیح برای کراس‌کامپایل Linux روی ARM64
           rustup target add aarch64-unknown-linux-gnu
           rustup component add rust-src rustfmt
 
-          # bindgen با همان Clang 11 که قبلاً دانلود شده
           LIBCLANG_PATH="$CLANG_BIN" cargo install bindgen-cli --locked
 
-          # کراس‌کامپایلر: Clang 11 از toolchain موجود — بدون دانلود جدید
           mkdir -p "$HOME/.cargo"
           {
             echo '[target.aarch64-unknown-linux-gnu]'
@@ -88,7 +107,6 @@ jobs:
           rustc --version
           cargo --version
           bindgen --version
-      # ──────────────────────────────────────────────────────────────────────────
 
       - name: Set timezone (Asia/Kolkata)
         run: |
@@ -102,7 +120,7 @@ jobs:
           PATCH_REPO="https://raw.githubusercontent.com/rasolarmand114-tech/Patch"
 
           echo "Downloading patch..."
-          curl -fsSL "${PATCH_REPO}/main/${PATCH_FILE}"   -o "${PATCH_FILE}" \
+          curl -fsSL "${PATCH_REPO}/main/${PATCH_FILE}"    -o "${PATCH_FILE}" \
           || curl -fsSL "${PATCH_REPO}/master/${PATCH_FILE}" -o "${PATCH_FILE}"
 
           echo "Verifying patch..."
