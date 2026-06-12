@@ -5,7 +5,7 @@ on:
     inputs:
       BRANCH:
         description: Kernel branch
-        default: 'main'
+        default: "main"
         required: true
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
@@ -49,40 +49,43 @@ jobs:
       - name: Fetch toolchains (Clang 11 + GCC 4.9)
         working-directory: kernel_root
         run: |
-          mkdir toolchains && cd toolchains
+          mkdir -p toolchains
+          cd toolchains
+
           git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
           git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
 
-      # ── مرحله جدید: پاک کردن Rust از پیش‌نصب‌شده GitHub ─────────────────────
       - name: Remove pre-installed Rust
         run: |
           rustup self uninstall -y 2>/dev/null || true
 
-          sudo rm -rf "$HOME/.cargo"    \
-                      "$HOME/.rustup"   \
-                      /usr/share/rust   \
-                      /usr/local/cargo  \
-                      /usr/local/rustup
+          sudo rm -rf \
+            "$HOME/.cargo" \
+            "$HOME/.rustup" \
+            /usr/share/rust \
+            /usr/local/cargo \
+            /usr/local/rustup
 
-          sudo rm -f /usr/local/bin/rustup \
-                     /usr/local/bin/rustc  \
-                     /usr/local/bin/cargo  \
-                     /usr/bin/rustup       \
-                     /usr/bin/rustc        \
-                     /usr/bin/cargo
+          sudo rm -f \
+            /usr/local/bin/rustup \
+            /usr/local/bin/rustc \
+            /usr/local/bin/cargo \
+            /usr/bin/rustup \
+            /usr/bin/rustc \
+            /usr/bin/cargo
 
-          which rustc  && echo "WARNING: rustc still present"  || echo "rustc  clean"
-          which cargo  && echo "WARNING: cargo still present"  || echo "cargo  clean"
-          which rustup && echo "WARNING: rustup still present" || echo "rustup clean"
-      # ──────────────────────────────────────────────────────────────────────────
+          which rustc || echo "rustc clean"
+          which cargo || echo "cargo clean"
+          which rustup || echo "rustup clean"
 
-      - name: Install Rust toolchain (aarch64-unknown-linux-gnu)
+      - name: Install Rust toolchain
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
 
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
             --default-toolchain stable \
             --profile minimal
+
           source "$HOME/.cargo/env"
 
           rustup target add aarch64-unknown-linux-gnu
@@ -91,46 +94,56 @@ jobs:
           LIBCLANG_PATH="$CLANG_BIN" cargo install bindgen-cli --locked
 
           mkdir -p "$HOME/.cargo"
-          {
-            echo '[target.aarch64-unknown-linux-gnu]'
-            echo "linker = \"${CLANG_BIN}/clang\""
-            echo "ar     = \"${CLANG_BIN}/llvm-ar\""
-            echo 'rustflags = ["-C", "linker-flavor=ld.lld", "-C", "link-arg=--target=aarch64-linux-gnu"]'
-          } >> "$HOME/.cargo/config.toml"
 
-          echo "$HOME/.cargo/bin"                        >> "$GITHUB_PATH"
-          echo "RUSTUP_HOME=$HOME/.rustup"                >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$HOME/.cargo"                  >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-linux-gnu"    >> "$GITHUB_ENV"
-          echo "LIBCLANG_PATH=${CLANG_BIN}"               >> "$GITHUB_ENV"
+          cat >> "$HOME/.cargo/config.toml" << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "${CLANG_BIN}/clang"
+          ar = "${CLANG_BIN}/llvm-ar"
+          rustflags = [
+            "-C", "linker-flavor=ld.lld",
+            "-C", "link-arg=--target=aarch64-linux-gnu"
+          ]
+          EOF
+
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+          echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-unknown-linux-gnu" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
 
           rustc --version
           cargo --version
           bindgen --version
 
-      - name: Set timezone (Asia/Kolkata)
+      - name: Set timezone
         run: |
-          sudo rm /etc/localtime
-          sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+          sudo rm -f /etc/localtime
+          sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      - name: Fetch and apply patch (0001-schad-arg-hook)
+      - name: Fetch and apply patch
         working-directory: kernel_root
         run: |
+          set -e
+
           PATCH_FILE="0001-schad-arg-hook.patch"
-          PATCH_REPO="https://raw.githubusercontent.com/rasolarmand114-tech/Patch"
+          PATCH_URL="https://raw.githubusercontent.com/rasolarmand114-tech/Patch/main/${PATCH_FILE}"
 
           echo "Downloading patch..."
-          curl -fsSL "${PATCH_REPO}/main/${PATCH_FILE}"    -o "${PATCH_FILE}" \
-          || curl -fsSL "${PATCH_REPO}/master/${PATCH_FILE}" -o "${PATCH_FILE}"
+          curl -L --fail "$PATCH_URL" -o "$PATCH_FILE"
 
-          echo "Verifying patch..."
-          head -5 "${PATCH_FILE}"
+          echo "Patch header:"
+          head -10 "$PATCH_FILE"
+
+          echo "Checking patch..."
+          git apply --check "$PATCH_FILE"
 
           echo "Applying patch..."
-          git apply --whitespace=fix "${PATCH_FILE}"
+          git apply --whitespace=fix "$PATCH_FILE"
+
+          rm -f "$PATCH_FILE"
 
           echo "Patch applied successfully."
-          rm -f "${PATCH_FILE}"
 
       - name: Build kernel
         id: buildKernel
@@ -139,21 +152,19 @@ jobs:
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          export KBUILD_BUILD_USER="exlinux"
-          export KBUILD_BUILD_HOST="github"
+          export KBUILD_BUILD_USER=exlinux
+          export KBUILD_BUILD_HOST=github
           export BUILD_START=$(date)
           export IS_CI=true
 
           export RUST_LIB_SRC="$(rustc --print sysroot)/lib/rustlib/src/rust/library"
 
-          export DEFCONFIG="exlinux_defconfig"
-          export DEVICE_ID="A12s"
-          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux"
+          export DEFCONFIG=exlinux_defconfig
+          export DEVICE_ID=A12s
+          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/exlinux
 
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
-            echo "Switching SELinux to Permissive mode..."
+          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
-            grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
             SELINUX_STATE="Permissive"
           else
             SELINUX_STATE="Enforcing"
@@ -161,11 +172,13 @@ jobs:
 
           echo "SELinux is set to: $SELINUX_STATE"
 
-          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+          bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
           mv .config build_config.txt
+
           gitsha1=$(git rev-parse --short HEAD)
-          buildDetails="$(make kernelversion)-$(echo $DEVICE_ID)_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
       - name: Upload kernel images
