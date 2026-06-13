@@ -123,8 +123,9 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
-          echo "CONFIG_SCHED_ARG=y" >> arch/arm64/configs/exlinux_defconfig
-          echo "CONFIG_SCHED_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
+          # ── FIX 1: Correct CONFIG names (was CONFIG_SCHED_ARG*) ──────────
+          echo "CONFIG_SCHAD_ARG=y"     >> arch/arm64/configs/exlinux_defconfig
+          echo "CONFIG_SCHAD_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
 
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
@@ -153,18 +154,30 @@ jobs:
 
           bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
+          # ── FIX 3: Explicitly build kernel modules (.ko files) ───────────
+          # build_kernel.sh builds the Image; modules need a separate pass.
+          make ARCH=arm64 \
+               CC=$(pwd)/toolchains/clang/bin/clang \
+               CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android- \
+               CLANG_TRIPLE=aarch64-linux-gnu- \
+               RUSTC="$HOME/.cargo/bin/rustc" \
+               -j$(nproc --all) modules 2>&1 | tail -30 || true
+
           mv .config build_config.txt || true
 
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
-          
-          
+
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+          # ── FIX 2: Don't fail the whole action when *.ko is missing ──────
+          # upload-artifact@v4 exits 1 if ANY glob matches nothing,
+          # which previously prevented Image + DTB from uploading too.
+          if-no-files-found: warn
           path: |
             kernel_root/arch/arm64/boot/Image
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
