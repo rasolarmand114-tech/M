@@ -104,11 +104,11 @@ jobs:
 
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
 
-          echo "RUSTUP_HOME=$HOME/.rustup" >> "$GITHUB_ENV"
-          echo "CARGO_HOME=$HOME/.cargo" >> "$GITHUB_ENV"
-          echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01" >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-none" >> "$GITHUB_ENV"
-          echo "LIBCLANG_PATH=$CLANG_BIN" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$HOME/.rustup"            >> "$GITHUB_ENV"
+          echo "CARGO_HOME=$HOME/.cargo"              >> "$GITHUB_ENV"
+          echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01"  >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-unknown-none"      >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$CLANG_BIN"             >> "$GITHUB_ENV"
 
           rustc +nightly-2024-02-01 --version
           cargo +nightly-2024-02-01 --version
@@ -123,9 +123,9 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
-          # ── FIX 1: Correct CONFIG names (was CONFIG_SCHED_ARG*) ──────────
-          echo "CONFIG_SCHAD_ARG=y"     >> arch/arm64/configs/exlinux_defconfig
-          echo "CONFIG_SCHAD_ARG_KMM=m" >> arch/arm64/configs/exlinux_defconfig
+          # CONFIG_SCHAD_ARG=y (hook در kernel/sched/) — in-tree، نیاز به defconfig داره
+          echo "CONFIG_SCHAD_ARG=y" >> arch/arm64/configs/exlinux_defconfig
+          # CONFIG_SCHAD_ARG_KMM از defconfig حذف شد — external module، مستقیم به make پاس میشه
 
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
@@ -154,15 +154,6 @@ jobs:
 
           bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
-          # ── FIX 3: Explicitly build kernel modules (.ko files) ───────────
-          # build_kernel.sh builds the Image; modules need a separate pass.
-          make ARCH=arm64 \
-               CC=$(pwd)/toolchains/clang/bin/clang \
-               CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android- \
-               CLANG_TRIPLE=aarch64-linux-gnu- \
-               RUSTC="$HOME/.cargo/bin/rustc" \
-               -j$(nproc --all) modules 2>&1 | tail -30 || true
-
           mv .config build_config.txt || true
 
           gitsha1=$(git rev-parse --short HEAD)
@@ -170,16 +161,79 @@ jobs:
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
+      # ── مرحله ۱: کامپایل Rust → arg_rust.o ─────────────────────────
+      # Linux 4.19 نیتیو Rust support نداره.
+      # rustc مستقیم صدا زده میشه و arg_rust.o رو قبل از kbuild میسازه.
+      # کامپایلر: rustc nightly-2024-02-01, target: aarch64-unknown-none
+      - name: Build ARG Rust core (arg_rust.o)
+        working-directory: kernel_root
+        run: |
+          source "$HOME/.cargo/env"
+
+          ARG_DIR="$GITHUB_WORKSPACE/kernel_root/arg"
+          RUST_SYSROOT=$(rustc +nightly-2024-02-01 --print sysroot)
+
+          echo "=== Rust compiler ==="
+          rustc +nightly-2024-02-01 --version
+          echo "=== sysroot: $RUST_SYSROOT ==="
+          echo "=== target: aarch64-unknown-none ==="
+
+          rustc +nightly-2024-02-01                    \
+            --edition 2021                             \
+            --crate-type staticlib                     \
+            --crate-name arg_sched                     \
+            --target aarch64-unknown-none              \
+            -C panic=abort                             \
+            -C opt-level=2                             \
+            -C code-model=small                        \
+            -C relocation-model=pic                    \
+            --emit obj                                 \
+            -Z unstable-options                        \
+            -Z build-std=core,alloc                    \
+            --sysroot "$RUST_SYSROOT"                  \
+            -A dead_code                               \
+            -A unused_variables                        \
+            -A non_snake_case                          \
+            -A non_upper_case_globals                  \
+            -o "$ARG_DIR/arg_rust.o"                   \
+            "$ARG_DIR/src/lib.rs"
+
+          echo "=== arg_rust.o built ==="
+          ls -lh "$ARG_DIR/arg_rust.o"
+          file "$ARG_DIR/arg_rust.o"
+
+      # ── مرحله ۲: build ماژول با kbuild (external module) ────────────
+      # M= یعنی kbuild وارد arg/ میشه بدون اینکه نیاز به root Makefile/Kconfig باشه.
+      # arg_rust.o از مرحله قبل آماده‌ست؛ rule خالی در arg/Makefile → kbuild دستش نمیزنه.
+      - name: Build ARG kernel module (arg_sched.ko)
+        working-directory: kernel_root
+        run: |
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+
+          make -C "$GITHUB_WORKSPACE/kernel_root"                                \
+               M="$GITHUB_WORKSPACE/kernel_root/arg"                             \
+               ARCH=arm64                                                         \
+               CC=$(pwd)/toolchains/clang/bin/clang                              \
+               CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android- \
+               CLANG_TRIPLE=aarch64-linux-gnu-                                   \
+               CONFIG_SCHAD_ARG=y                                                 \
+               CONFIG_SCHAD_ARG_KMM=m                                             \
+               -j$(nproc --all)                                                   \
+               modules
+
+          echo "=== .ko files ==="
+          find "$GITHUB_WORKSPACE/kernel_root/arg" -name "*.ko" | while read ko; do
+            ls -lh "$ko"
+            file "$ko"
+          done
+
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
-          # ── FIX 2: Don't fail the whole action when *.ko is missing ──────
-          # upload-artifact@v4 exits 1 if ANY glob matches nothing,
-          # which previously prevented Image + DTB from uploading too.
           if-no-files-found: warn
           path: |
             kernel_root/arch/arm64/boot/Image
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
-            kernel_root/arg/*.ko
+            kernel_root/arg/arg_sched.ko
