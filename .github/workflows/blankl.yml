@@ -51,29 +51,18 @@ jobs:
         run: |
           mkdir -p toolchains
           cd toolchains
-
           git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
           git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
 
       - name: Remove pre-installed Rust
         run: |
           rustup self uninstall -y 2>/dev/null || true
-
           sudo rm -rf \
-            "$HOME/.cargo" \
-            "$HOME/.rustup" \
-            /usr/share/rust \
-            /usr/local/cargo \
-            /usr/local/rustup
-
+            "$HOME/.cargo" "$HOME/.rustup" /usr/share/rust \
+            /usr/local/cargo /usr/local/rustup
           sudo rm -f \
-            /usr/local/bin/rustup \
-            /usr/local/bin/rustc \
-            /usr/local/bin/cargo \
-            /usr/bin/rustup \
-            /usr/bin/rustc \
-            /usr/bin/cargo
-
+            /usr/local/bin/rustup /usr/local/bin/rustc /usr/local/bin/cargo \
+            /usr/bin/rustup /usr/bin/rustc /usr/bin/cargo
           which rustc || echo "rustc clean"
           which cargo || echo "cargo clean"
           which rustup || echo "rustup clean"
@@ -95,15 +84,13 @@ jobs:
           cargo +nightly-2024-02-01 install bindgen-cli --locked
 
           mkdir -p "$HOME/.cargo"
-
           cat > "$HOME/.cargo/config.toml" << EOF
           [target.aarch64-unknown-none]
           linker = "${CLANG_BIN}/clang"
           ar = "${CLANG_BIN}/llvm-ar"
           EOF
 
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
+          echo "$HOME/.cargo/bin"                    >> "$GITHUB_PATH"
           echo "RUSTUP_HOME=$HOME/.rustup"            >> "$GITHUB_ENV"
           echo "CARGO_HOME=$HOME/.cargo"              >> "$GITHUB_ENV"
           echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01"  >> "$GITHUB_ENV"
@@ -119,13 +106,62 @@ jobs:
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
+      # ── FIX 1: Rust قبل از kernel build ─────────────────────────────
+      # وقتی RAM خالیه، rustc اجرا میشه
+      # بعد از kernel build حدود 4-5GB RAM مصرف شده → OOM
+      - name: Build ARG Rust core (arg_rust.o)
+        working-directory: kernel_root
+        run: |
+          source "$HOME/.cargo/env"
+
+          ARG_DIR="$GITHUB_WORKSPACE/kernel_root/arg"
+          RUST_SYSROOT=$(rustc +nightly-2024-02-01 --print sysroot)
+
+          echo "=== RAM ==="
+          free -h
+          echo "=== rustc: $(rustc +nightly-2024-02-01 --version) ==="
+          echo "=== sysroot: $RUST_SYSROOT ==="
+          echo "=== target: aarch64-unknown-none ==="
+
+          # FIX 2: حذف -Z build-std و -Z unstable-options
+          # این‌ها Cargo flag هستن نه rustc
+          # core برای aarch64-unknown-none prebuilt هست — نیازی به build-std نیست
+          # alloc هم استفاده نمیشه چون هیچ Box/Vec در کد نیست
+          rustc +nightly-2024-02-01          \
+            --edition 2021                   \
+            --crate-type staticlib           \
+            --crate-name arg_sched           \
+            --target aarch64-unknown-none    \
+            -C panic=abort                   \
+            -C opt-level=2                   \
+            -C codegen-units=1               \
+            -C code-model=small              \
+            -C relocation-model=pic          \
+            --emit obj                       \
+            -A dead_code                     \
+            -A unused_variables              \
+            -A non_snake_case                \
+            -A non_upper_case_globals        \
+            -o "$ARG_DIR/arg_rust.o"         \
+            "$ARG_DIR/src/lib.rs"
+
+          echo "=== arg_rust.o ==="
+          ls -lh "$ARG_DIR/arg_rust.o"
+          file   "$ARG_DIR/arg_rust.o"
+
+          test -f "$ARG_DIR/arg_rust.o" || {
+            echo "ERROR: arg_rust.o missing"
+            exit 1
+          }
+
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
         run: |
-          # CONFIG_SCHAD_ARG=y (hook در kernel/sched/) — in-tree، نیاز به defconfig داره
-          echo "CONFIG_SCHAD_ARG=y" >> arch/arm64/configs/exlinux_defconfig
-          # CONFIG_SCHAD_ARG_KMM از defconfig حذف شد — external module، مستقیم به make پاس میشه
+          # FIX 3: WireGuard disable — Clang 11 + این kernel ناسازگارن
+          
+          # hook داخل kernel/sched/ — in-tree، نیاز به defconfig داره
+          echo "CONFIG_SCHAD_ARG=y"  >> arch/arm64/configs/exlinux_defconfig
 
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
@@ -158,74 +194,28 @@ jobs:
 
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
-
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
-      # ── مرحله ۱: کامپایل Rust → arg_rust.o ─────────────────────────
-      # Linux 4.19 نیتیو Rust support نداره.
-      # rustc مستقیم صدا زده میشه و arg_rust.o رو قبل از kbuild میسازه.
-      # کامپایلر: rustc nightly-2024-02-01, target: aarch64-unknown-none
-      - name: Build ARG Rust core (arg_rust.o)
-        working-directory: kernel_root
-        run: |
-          source "$HOME/.cargo/env"
-
-          ARG_DIR="$GITHUB_WORKSPACE/kernel_root/arg"
-          RUST_SYSROOT=$(rustc +nightly-2024-02-01 --print sysroot)
-
-          echo "=== Rust compiler ==="
-          rustc +nightly-2024-02-01 --version
-          echo "=== sysroot: $RUST_SYSROOT ==="
-          echo "=== target: aarch64-unknown-none ==="
-
-          rustc +nightly-2024-02-01                    \
-            --edition 2021                             \
-            --crate-type staticlib                     \
-            --crate-name arg_sched                     \
-            --target aarch64-unknown-none              \
-            -C panic=abort                             \
-            -C opt-level=2                             \
-            -C code-model=small                        \
-            -C relocation-model=pic                    \
-            --emit obj                                 \
-            -Z unstable-options                        \
-            -Z build-std=core,alloc                    \
-            --sysroot "$RUST_SYSROOT"                  \
-            -A dead_code                               \
-            -A unused_variables                        \
-            -A non_snake_case                          \
-            -A non_upper_case_globals                  \
-            -o "$ARG_DIR/arg_rust.o"                   \
-            "$ARG_DIR/src/lib.rs"
-
-          echo "=== arg_rust.o built ==="
-          ls -lh "$ARG_DIR/arg_rust.o"
-          file "$ARG_DIR/arg_rust.o"
-
-      # ── مرحله ۲: build ماژول با kbuild (external module) ────────────
-      # M= یعنی kbuild وارد arg/ میشه بدون اینکه نیاز به root Makefile/Kconfig باشه.
-      # arg_rust.o از مرحله قبل آماده‌ست؛ rule خالی در arg/Makefile → kbuild دستش نمیزنه.
       - name: Build ARG kernel module (arg_sched.ko)
         working-directory: kernel_root
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
 
-          make -C "$GITHUB_WORKSPACE/kernel_root"                                \
-               M="$GITHUB_WORKSPACE/kernel_root/arg"                             \
-               ARCH=arm64                                                         \
-               CC=$(pwd)/toolchains/clang/bin/clang                              \
-               CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android- \
-               CLANG_TRIPLE=aarch64-linux-gnu-                                   \
-               CONFIG_SCHAD_ARG=y                                                 \
-               CONFIG_SCHAD_ARG_KMM=m                                             \
-               -j$(nproc --all)                                                   \
+          # External module — arg_rust.o از step قبل آماده‌ست
+          # rule خالی $(obj)/arg_rust.o: ; در arg/Makefile → kbuild دستش نمیزنه
+          make -C "$GITHUB_WORKSPACE/kernel_root"                                  \
+               M="$GITHUB_WORKSPACE/kernel_root/arg"                               \
+               ARCH=arm64                                                           \
+               CC=$(pwd)/toolchains/clang/bin/clang                                \
+               CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-   \
+               CLANG_TRIPLE=aarch64-linux-gnu-                                     \
+               CONFIG_SCHAD_ARG=y                                                  \
+               CONFIG_SCHAD_ARG_KMM=m                                              \
+               -j$(nproc --all)                                                    \
                modules
 
-          echo "=== .ko files ==="
-          find "$GITHUB_WORKSPACE/kernel_root/arg" -name "*.ko" | while read ko; do
-            ls -lh "$ko"
-            file "$ko"
-          done
+          echo "=== .ko ==="
+          find "$GITHUB_WORKSPACE/kernel_root/arg" -name "*.ko" -exec ls -lh {} \;
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
