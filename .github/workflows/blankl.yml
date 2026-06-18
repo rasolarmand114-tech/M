@@ -94,7 +94,7 @@ jobs:
           echo "RUSTUP_HOME=$HOME/.rustup"            >> "$GITHUB_ENV"
           echo "CARGO_HOME=$HOME/.cargo"              >> "$GITHUB_ENV"
           echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01"  >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-none"      >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-linux-android"      >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$CLANG_BIN"             >> "$GITHUB_ENV"
 
           rustc +nightly-2024-02-01 --version
