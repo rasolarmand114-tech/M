@@ -129,7 +129,7 @@ jobs:
           # alloc هم استفاده نمیشه چون هیچ Box/Vec در کد نیست
           rustc +nightly-2024-02-01          \
             --edition 2021                   \
-            --crate-type staticlib           \
+            ----crate-type lib         \
             --crate-name arg_sched           \
             --target aarch64-unknown-linux-gnu   \
             -C panic=abort                   \
@@ -149,7 +149,8 @@ jobs:
           echo "=== arg_rust.o ==="
           ls -lh "$ARG_DIR/arg_rust.o"
           file   "$ARG_DIR/arg_rust.o"
-
+          file arg/arg_rust.o
+          readelf -h arg/arg_rust.o
           test -f "$ARG_DIR/arg_rust.o" || {
             echo "ERROR: arg_rust.o missing"
             exit 1
