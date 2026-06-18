@@ -80,12 +80,12 @@ jobs:
           rustup toolchain install nightly-2024-02-01
           rustup component add rust-src --toolchain nightly-2024-02-01
           rustup component add rustfmt --toolchain nightly-2024-02-01
-          rustup target add aarch64-unknown-none --toolchain nightly-2024-02-01
+          rustup target add aarch64-linux-android --toolchain nightly-2024-02-01
           cargo +nightly-2024-02-01 install bindgen-cli --locked
 
           mkdir -p "$HOME/.cargo"
           cat > "$HOME/.cargo/config.toml" << EOF
-          [target.aarch64-unknown-none]
+          [target.aarch64-linux-android]
           linker = "${CLANG_BIN}/clang"
           ar = "${CLANG_BIN}/llvm-ar"
           EOF
@@ -121,7 +121,7 @@ jobs:
           free -h
           echo "=== rustc: $(rustc +nightly-2024-02-01 --version) ==="
           echo "=== sysroot: $RUST_SYSROOT ==="
-          echo "=== target: aarch64-unknown-none ==="
+          echo "=== target: aarch64-linux-android ==="
 
           # FIX 2: حذف -Z build-std و -Z unstable-options
           # این‌ها Cargo flag هستن نه rustc
@@ -131,7 +131,7 @@ jobs:
             --edition 2021                   \
             --crate-type staticlib           \
             --crate-name arg_sched           \
-            --target aarch64-unknown-none    \
+            --target linux-android           \
             -C panic=abort                   \
             -C opt-level=2                   \
             -C codegen-units=1               \
