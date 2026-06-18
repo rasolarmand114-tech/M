@@ -131,7 +131,7 @@ jobs:
             --edition 2021                   \
             --crate-type staticlib           \
             --crate-name arg_sched           \
-            --target linux-android           \
+            --target aarch64-linux-android           \
             -C panic=abort                   \
             -C opt-level=2                   \
             -C codegen-units=1               \
