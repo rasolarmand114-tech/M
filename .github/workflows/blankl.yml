@@ -129,7 +129,7 @@ jobs:
           # alloc هم استفاده نمیشه چون هیچ Box/Vec در کد نیست
           rustc +nightly-2024-02-01          \
             --edition 2021                   \
-            ----crate-type lib         \
+            --crate-type lib         \
             --crate-name arg_sched           \
             --target aarch64-unknown-linux-gnu   \
             -C panic=abort                   \
