@@ -32,7 +32,6 @@ jobs:
             bc cpio flex bison git python-is-python3 \
             tar perl wget curl lz4 libssl-dev \
             libclang-dev libelf-dev llvm-dev
-
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
 
@@ -57,87 +56,67 @@ jobs:
       - name: Remove pre-installed Rust
         run: |
           rustup self uninstall -y 2>/dev/null || true
-          sudo rm -rf \
-            "$HOME/.cargo" "$HOME/.rustup" /usr/share/rust \
-            /usr/local/cargo /usr/local/rustup
-          sudo rm -f \
-            /usr/local/bin/rustup /usr/local/bin/rustc /usr/local/bin/cargo \
-            /usr/bin/rustup /usr/bin/rustc /usr/bin/cargo
+          sudo rm -rf "$HOME/.cargo" "$HOME/.rustup" /usr/share/rust \
+                      /usr/local/cargo /usr/local/rustup
+          sudo rm -f /usr/local/bin/rustup /usr/local/bin/rustc /usr/local/bin/cargo \
+                     /usr/bin/rustup /usr/bin/rustc /usr/bin/cargo
           which rustc || echo "rustc clean"
-          which cargo || echo "cargo clean"
-          which rustup || echo "rustup clean"
 
       - name: Install Rust toolchain
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
-
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-            --profile minimal \
-            --default-toolchain none
-
+            --profile minimal --default-toolchain none
           source "$HOME/.cargo/env"
-
           rustup toolchain install nightly-2024-02-01
           rustup component add rust-src --toolchain nightly-2024-02-01
           rustup component add rustfmt --toolchain nightly-2024-02-01
-          rustup target add aarch64-unknown-linux-gnu --toolchain nightly-2024-02-01
+          rustup target add aarch64-unknown-none --toolchain nightly-2024-02-01
           cargo +nightly-2024-02-01 install bindgen-cli --locked
-
           mkdir -p "$HOME/.cargo"
           cat > "$HOME/.cargo/config.toml" << EOF
-          [target.aarch64-linux-gnu]
+          [target.aarch64-unknown-none]
           linker = "${CLANG_BIN}/clang"
           ar = "${CLANG_BIN}/llvm-ar"
           EOF
-
           echo "$HOME/.cargo/bin"                    >> "$GITHUB_PATH"
           echo "RUSTUP_HOME=$HOME/.rustup"            >> "$GITHUB_ENV"
           echo "CARGO_HOME=$HOME/.cargo"              >> "$GITHUB_ENV"
           echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01"  >> "$GITHUB_ENV"
-          echo "RUST_TARGET=aarch64-unknown-linux-gnu"      >> "$GITHUB_ENV"
+          echo "RUST_TARGET=aarch64-unknown-none"      >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$CLANG_BIN"             >> "$GITHUB_ENV"
-
           rustc +nightly-2024-02-01 --version
           cargo +nightly-2024-02-01 --version
-          bindgen --version
 
       - name: Set timezone
         run: |
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      # ── FIX 1: Rust قبل از kernel build ─────────────────────────────
-      # وقتی RAM خالیه، rustc اجرا میشه
-      # بعد از kernel build حدود 4-5GB RAM مصرف شده → OOM
+      # ── Rust اول — قبل از kernel build (RAM خالیه) ─────────────────
       - name: Build ARG Rust core (arg_rust.o)
         working-directory: kernel_root
         run: |
           source "$HOME/.cargo/env"
-
           ARG_DIR="$GITHUB_WORKSPACE/kernel_root/arg"
           RUST_SYSROOT=$(rustc +nightly-2024-02-01 --print sysroot)
 
-          echo "=== RAM ==="
-          free -h
           echo "=== rustc: $(rustc +nightly-2024-02-01 --version) ==="
-          echo "=== sysroot: $RUST_SYSROOT ==="
-          echo "=== target: aarch64-unknown-linux-gnu ==="
+          echo "=== RAM ===" && free -h
 
-          # FIX 2: حذف -Z build-std و -Z unstable-options
-          # این‌ها Cargo flag هستن نه rustc
-          # core برای aarch64-linux-gnu prebuilt هست — نیازی به build-std نیست
-          # alloc هم استفاده نمیشه چون هیچ Box/Vec در کد نیست
+          # BUG1 FIX: relocation-model=static (نه pic)
+          #   pic → GOT relocations → ARM64 module loader نمیشناسه → ENOEXEC
+          #   static → PC-relative → ARM64 module loader OK ✓
           rustc +nightly-2024-02-01          \
             --edition 2021                   \
-            --crate-type lib         \
+            --crate-type staticlib           \
             --crate-name arg_sched           \
-            --target aarch64-unknown-linux-gnu   \
+            --target aarch64-unknown-none    \
             -C panic=abort                   \
             -C opt-level=2                   \
             -C codegen-units=1               \
             -C code-model=small              \
             -C relocation-model=static       \
-            -C target-feature=-neon          \
             --emit obj                       \
             -A dead_code                     \
             -A unused_variables              \
@@ -146,23 +125,23 @@ jobs:
             -o "$ARG_DIR/arg_rust.o"         \
             "$ARG_DIR/src/lib.rs"
 
-          echo "=== arg_rust.o ==="
-          ls -lh "$ARG_DIR/arg_rust.o"
-          file   "$ARG_DIR/arg_rust.o"
-          file arg/arg_rust.o
-          readelf -h arg/arg_rust.o
-          test -f "$ARG_DIR/arg_rust.o" || {
-            echo "ERROR: arg_rust.o missing"
-            exit 1
-          }
+          echo "=== arg_rust.o ===" && ls -lh "$ARG_DIR/arg_rust.o"
+          file "$ARG_DIR/arg_rust.o"
+
+          # BUG4 FIX: .cmd file بساز
+          #   بدون این فایل، modpost warning میده و CRC های MODVERSIONS
+          #   درست compute نمیشن → احتمال load fail
+          printf 'cmd_%s := pre-built by CI Rust step\n' \
+            "$ARG_DIR/arg_rust.o" > "$ARG_DIR/.arg_rust.o.cmd"
+          echo "=== .cmd file ===" && cat "$ARG_DIR/.arg_rust.o.cmd"
+
+          test -f "$ARG_DIR/arg_rust.o" || { echo "ERROR: arg_rust.o missing"; exit 1; }
 
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
         run: |
-          # FIX 3: WireGuard disable — Clang 11 + این kernel ناسازگارن
-          
-          # hook داخل kernel/sched/ — in-tree، نیاز به defconfig داره
+          echo "CONFIG_WIREGUARD=n"  >> arch/arm64/configs/exlinux_defconfig
           echo "CONFIG_SCHAD_ARG=y"  >> arch/arm64/configs/exlinux_defconfig
 
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
@@ -174,26 +153,18 @@ jobs:
           export RUST_LIB_SRC="$(rustc +nightly-2024-02-01 --print sysroot)/lib/rustlib/src/rust/library"
           export KBUILD_BUILD_USER=exlinux
           export KBUILD_BUILD_HOST=github
-          export BUILD_START=$(date)
           export IS_CI=true
 
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
-          export KERNEL_SOURCE=https://github.com/rasolarmand114-tech/exlinux
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
-            SELINUX_STATE="Permissive"
-          else
-            SELINUX_STATE="Enforcing"
           fi
-
-          echo "SELinux is set to: $SELINUX_STATE"
 
           bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
           mv .config build_config.txt || true
-
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
@@ -202,9 +173,6 @@ jobs:
         working-directory: kernel_root
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
-
-          # External module — arg_rust.o از step قبل آماده‌ست
-          # rule خالی $(obj)/arg_rust.o: ; در arg/Makefile → kbuild دستش نمیزنه
           make -C "$GITHUB_WORKSPACE/kernel_root"                                  \
                M="$GITHUB_WORKSPACE/kernel_root/arg"                               \
                ARCH=arm64                                                           \
@@ -215,7 +183,6 @@ jobs:
                CONFIG_SCHAD_ARG_KMM=m                                              \
                -j$(nproc --all)                                                    \
                modules
-
           echo "=== .ko ==="
           find "$GITHUB_WORKSPACE/kernel_root/arg" -name "*.ko" -exec ls -lh {} \;
 
