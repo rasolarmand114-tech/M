@@ -40,16 +40,13 @@ jobs:
           sudo swapoff -a || true
           sudo rm -f /swapfile
           sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
+          sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
           free -h
 
       - name: Fetch toolchains (Clang 11 + GCC 4.9)
         working-directory: kernel_root
         run: |
-          mkdir -p toolchains
-          cd toolchains
+          mkdir -p toolchains && cd toolchains
           git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
           git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
 
@@ -86,14 +83,13 @@ jobs:
           echo "RUST_TARGET=aarch64-unknown-none"      >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$CLANG_BIN"             >> "$GITHUB_ENV"
           rustc +nightly-2024-02-01 --version
-          cargo +nightly-2024-02-01 --version
 
       - name: Set timezone
         run: |
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      # ── Rust اول — قبل از kernel build (RAM خالیه) ─────────────────
+      # ── Rust اول (RAM خالیه) ─────────────────────────────────────
       - name: Build ARG Rust core (arg_rust.o)
         working-directory: kernel_root
         run: |
@@ -101,12 +97,9 @@ jobs:
           ARG_DIR="$GITHUB_WORKSPACE/kernel_root/arg"
           RUST_SYSROOT=$(rustc +nightly-2024-02-01 --print sysroot)
 
-          echo "=== rustc: $(rustc +nightly-2024-02-01 --version) ==="
-          echo "=== RAM ===" && free -h
+          free -h
+          echo "rustc: $(rustc +nightly-2024-02-01 --version)"
 
-          # BUG1 FIX: relocation-model=static (نه pic)
-          #   pic → GOT relocations → ARM64 module loader نمیشناسه → ENOEXEC
-          #   static → PC-relative → ARM64 module loader OK ✓
           rustc +nightly-2024-02-01          \
             --edition 2021                   \
             --crate-type staticlib           \
@@ -125,17 +118,14 @@ jobs:
             -o "$ARG_DIR/arg_rust.o"         \
             "$ARG_DIR/src/lib.rs"
 
-          echo "=== arg_rust.o ===" && ls -lh "$ARG_DIR/arg_rust.o"
-          file "$ARG_DIR/arg_rust.o"
+          ls -lh "$ARG_DIR/arg_rust.o"
+          file  "$ARG_DIR/arg_rust.o"
 
-          # BUG4 FIX: .cmd file بساز
-          #   بدون این فایل، modpost warning میده و CRC های MODVERSIONS
-          #   درست compute نمیشن → احتمال load fail
-          printf 'cmd_%s := pre-built by CI Rust step\n' \
+          # ── .cmd file برای modpost ─────────────────────────────────
+          printf 'cmd_%s := pre-built by CI\n' \
             "$ARG_DIR/arg_rust.o" > "$ARG_DIR/.arg_rust.o.cmd"
-          echo "=== .cmd file ===" && cat "$ARG_DIR/.arg_rust.o.cmd"
 
-          test -f "$ARG_DIR/arg_rust.o" || { echo "ERROR: arg_rust.o missing"; exit 1; }
+          test -f "$ARG_DIR/arg_rust.o" || { echo "ERROR: Rust build failed"; exit 1; }
 
       - name: Build kernel
         id: buildKernel
@@ -154,7 +144,6 @@ jobs:
           export KBUILD_BUILD_USER=exlinux
           export KBUILD_BUILD_HOST=github
           export IS_CI=true
-
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
 
@@ -163,6 +152,36 @@ jobs:
           fi
 
           bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+
+          # ── دیاگنوستیک: بررسی اینکه آیا SCHAD_ARG واقعاً active شد ──
+          echo ""
+          echo "=== DIAGNOSTIC: CONFIG_SCHAD_ARG in .config ==="
+          if grep -q "CONFIG_SCHAD_ARG=y" .config 2>/dev/null; then
+            echo "✓ CONFIG_SCHAD_ARG=y is in .config"
+          else
+            echo "✗ CONFIG_SCHAD_ARG NOT in .config — patch not applied!"
+            grep "SCHAD_ARG" .config || echo "  (not found at all)"
+          fi
+
+          echo ""
+          echo "=== DIAGNOSTIC: arg symbols in Module.symvers ==="
+          if grep -q "arg_enabled" Module.symvers 2>/dev/null; then
+            echo "✓ arg_enabled found in Module.symvers"
+            grep "arg_enabled\|arg_pick_next\|runqueues" Module.symvers
+          else
+            echo "✗ arg_enabled NOT in Module.symvers"
+            echo "  → kernel/sched/arg_hook.c was NOT compiled"
+            echo "  → Check: does kernel/sched/Kconfig have 'config SCHAD_ARG'?"
+            echo "  → Check: does kernel/sched/Makefile have 'obj-$(CONFIG_SCHAD_ARG) += arg_hook.o'?"
+          fi
+
+          echo ""
+          echo "=== DIAGNOSTIC: runqueues in Module.symvers ==="
+          if grep -q "runqueues" Module.symvers 2>/dev/null; then
+            echo "✓ runqueues exported"
+          else
+            echo "✗ runqueues NOT exported — module will fail to load"
+          fi
 
           mv .config build_config.txt || true
           gitsha1=$(git rev-parse --short HEAD)
@@ -173,6 +192,7 @@ jobs:
         working-directory: kernel_root
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
+
           make -C "$GITHUB_WORKSPACE/kernel_root"                                  \
                M="$GITHUB_WORKSPACE/kernel_root/arg"                               \
                ARCH=arm64                                                           \
@@ -183,8 +203,15 @@ jobs:
                CONFIG_SCHAD_ARG_KMM=m                                              \
                -j$(nproc --all)                                                    \
                modules
+
+          echo ""
           echo "=== .ko ==="
           find "$GITHUB_WORKSPACE/kernel_root/arg" -name "*.ko" -exec ls -lh {} \;
+
+          echo ""
+          echo "=== undefined symbols (should be empty after fix) ==="
+          nm "$GITHUB_WORKSPACE/kernel_root/arg/arg_sched.ko" 2>/dev/null \
+            | grep "^ *U " | sort || echo "  (nm not available)"
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
@@ -196,3 +223,4 @@ jobs:
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
             kernel_root/arg/arg_sched.ko
+            kernel_root/arg/build_config.txt
