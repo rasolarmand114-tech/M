@@ -1,0 +1,94 @@
+name: Build Android libdrm
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    env:
+      API: 33
+
+    steps:
+      - name: Clone libdrm
+        run: |
+          git clone https://android.googlesource.com/platform/external/libdrm
+          cd libdrm
+          git checkout android-13.0.0_r74
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson \
+            ninja-build \
+            pkg-config \
+            python3
+
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+
+      - name: Create Cross File
+        working-directory: libdrm
+        run: |
+          cat > android.ini <<EOF
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'armv8-a'
+          endian = 'little'
+
+          [binaries]
+          c = '${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang'
+          cpp = '${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android33-clang++'
+          ar = '${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar'
+          strip = '${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip'
+          nm = '${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm'
+          ranlib = '${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib'
+          pkg-config = '/usr/bin/pkg-config'
+
+          [properties]
+          needs_exe_wrapper = true
+          EOF
+
+      - name: Configure
+        working-directory: libdrm
+        run: |
+          meson setup build \
+            --cross-file android.ini \
+            --buildtype=release \
+            --default-library=shared \
+            -Dlibkms=true \
+            -Damdgpu=false \
+            -Dintel=false \
+            -Dradeon=false \
+            -Dnouveau=false \
+            -Dtegra=false \
+            -Dvc4=false \
+            -Detnaviv=false \
+            -Domap=false \
+            -Dfreedreno=false \
+            -Dcairo-tests=false \
+            -Dman-pages=false \
+            -Dvalgrind=false \
+            -Dinstall-test-programs=false
+
+      - name: Build
+        working-directory: libdrm
+        run: ninja -C build
+
+      - name: Strip
+        working-directory: libdrm
+        run: |
+          find build -name "*.so" -exec ${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip {} \;
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: libdrm-android13-arm64
+          path: |
+            libdrm/build/**/*.so
+            libdrm/build/**/*.a
