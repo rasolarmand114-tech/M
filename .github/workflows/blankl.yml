@@ -39,7 +39,8 @@ jobs:
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
-          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo fallocate -l 12G /swapfile || \
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
           sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
           free -h
 
@@ -47,41 +48,49 @@ jobs:
         working-directory: kernel_root
         run: |
           mkdir -p toolchains && cd toolchains
-          git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
-          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
+          git clone --depth=1 -b clang-11 \
+            https://github.com/rsuntk/toolchains.git clang
+          git clone --depth=1 -b androidcc-4.9 \
+            https://github.com/rsuntk/toolchains.git google
 
       - name: Remove pre-installed Rust
         run: |
           rustup self uninstall -y 2>/dev/null || true
           sudo rm -rf "$HOME/.cargo" "$HOME/.rustup" /usr/share/rust \
                       /usr/local/cargo /usr/local/rustup
-          sudo rm -f /usr/local/bin/rustup /usr/local/bin/rustc /usr/local/bin/cargo \
-                     /usr/bin/rustup /usr/bin/rustc /usr/bin/cargo
+          sudo rm -f /usr/local/bin/rustup /usr/local/bin/rustc \
+                     /usr/local/bin/cargo /usr/bin/rustup \
+                     /usr/bin/rustc /usr/bin/cargo
           which rustc || echo "rustc clean"
 
       - name: Install Rust toolchain
         run: |
           CLANG_BIN="$GITHUB_WORKSPACE/kernel_root/toolchains/clang/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-            --profile minimal --default-toolchain none
+
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain none
           source "$HOME/.cargo/env"
+
           rustup toolchain install nightly-2024-02-01
-          rustup component add rust-src --toolchain nightly-2024-02-01
-          rustup component add rustfmt --toolchain nightly-2024-02-01
+          rustup component add rust-src  --toolchain nightly-2024-02-01
+          rustup component add rustfmt   --toolchain nightly-2024-02-01
           rustup target add aarch64-unknown-none --toolchain nightly-2024-02-01
           cargo +nightly-2024-02-01 install bindgen-cli --locked
+
           mkdir -p "$HOME/.cargo"
           cat > "$HOME/.cargo/config.toml" << EOF
           [target.aarch64-unknown-none]
           linker = "${CLANG_BIN}/clang"
           ar = "${CLANG_BIN}/llvm-ar"
           EOF
+
           echo "$HOME/.cargo/bin"                    >> "$GITHUB_PATH"
           echo "RUSTUP_HOME=$HOME/.rustup"            >> "$GITHUB_ENV"
           echo "CARGO_HOME=$HOME/.cargo"              >> "$GITHUB_ENV"
           echo "RUSTUP_TOOLCHAIN=nightly-2024-02-01"  >> "$GITHUB_ENV"
           echo "RUST_TARGET=aarch64-unknown-none"      >> "$GITHUB_ENV"
           echo "LIBCLANG_PATH=$CLANG_BIN"             >> "$GITHUB_ENV"
+
           rustc +nightly-2024-02-01 --version
 
       - name: Set timezone
@@ -89,7 +98,7 @@ jobs:
           sudo rm -f /etc/localtime
           sudo ln -sf /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
-      # ── Rust اول (RAM خالیه) ─────────────────────────────────────
+      # ── STEP 1: Rust اول — RAM خالیه ──────────────────────────────
       - name: Build ARG Rust core (arg_rust.o)
         working-directory: kernel_root
         run: |
@@ -117,26 +126,63 @@ jobs:
             "$ARG_DIR/src/lib.rs"
 
           ls -lh "$ARG_DIR/arg_rust.o"
-          file  "$ARG_DIR/arg_rust.o"
+          file   "$ARG_DIR/arg_rust.o"
+
+          # .cmd file برای modpost
           printf 'cmd_%s := pre-built by CI\n' \
             "$ARG_DIR/arg_rust.o" > "$ARG_DIR/.arg_rust.o.cmd"
-          test -f "$ARG_DIR/arg_rust.o" || { echo "ERROR: Rust build failed"; exit 1; }
 
-      # ── کلیدی‌ترین مرحله: inject مستقیم به kernel/sched/ ─────────
-      # git apply نه — چون ممکنه context مطابقت نداشته باشه
-      # به جاش مستقیم فایل‌ها رو ویرایش میکنیم
+          test -f "$ARG_DIR/arg_rust.o" || \
+            { echo "ERROR: arg_rust.o missing"; exit 1; }
+
+      # ── STEP 2: inject به kernel/sched/ با Python ─────────────────
+      # BUG1 FIX: از Python استفاده میکنیم نه sed
+      #   - sed \n در replacement روی همه نسخه‌ها کار نمیکنه
+      #   - Python str.replace() مطمئن‌تره
+      # BUG2 FIX: sched.h قبل از آخرین #endif insert میشه نه بعدش
+      # BUG3 FIX: arg_hook.c inline نوشته میشه — به فایل خارجی وابسته نیست
       - name: Inject ARG hook into kernel/sched/
         working-directory: kernel_root
         run: |
           SCHED="kernel/sched"
 
-          echo "=== Step 1: copy arg_hook.c ==="
-          cp arg/kernel-patch/arg_hook.c "$SCHED/arg_hook.c"
-          echo "  ✓ arg_hook.c copied"
+          # ── 1. arg_hook.c ─────────────────────────────────────────
+          if [ ! -f "$SCHED/arg_hook.c" ]; then
+            cat > "$SCHED/arg_hook.c" << 'ARG_HOOK'
+// SPDX-License-Identifier: GPL-2.0
+#include <linux/export.h>
+#include <linux/sched.h>
+#include "sched.h"
 
-          echo ""
-          echo "=== Step 2: add config SCHAD_ARG to kernel/sched/Kconfig ==="
-          # فقط اگه قبلاً inject نشده باشه
+bool arg_enabled __read_mostly = false;
+EXPORT_SYMBOL_GPL(arg_enabled);
+
+struct task_struct *(*arg_pick_next_hook)(struct rq *rq) __read_mostly = NULL;
+EXPORT_SYMBOL_GPL(arg_pick_next_hook);
+
+void (*arg_enqueue_hook)(struct rq *rq, struct task_struct *p) __read_mostly = NULL;
+EXPORT_SYMBOL_GPL(arg_enqueue_hook);
+
+void (*arg_wakeup_hook)(struct rq *rq, struct task_struct *p) __read_mostly = NULL;
+EXPORT_SYMBOL_GPL(arg_wakeup_hook);
+
+void (*arg_update_load_hook)(void) __read_mostly = NULL;
+EXPORT_SYMBOL_GPL(arg_update_load_hook);
+
+/*
+ * runqueues: Samsung A12 kernel این رو export نکرده.
+ * cpu_rq() macro در shim.c به این نیاز داره.
+ * اگه duplicate export error داد این بلوک رو حذف کن.
+ */
+DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+EXPORT_SYMBOL(runqueues);
+ARG_HOOK
+            echo "✓ arg_hook.c written"
+          else
+            echo "✓ arg_hook.c already exists"
+          fi
+
+          # ── 2. Kconfig ────────────────────────────────────────────
           if ! grep -q "SCHAD_ARG" "$SCHED/Kconfig"; then
             cat >> "$SCHED/Kconfig" << 'KCONFIG'
 
@@ -147,62 +193,34 @@ config SCHAD_ARG
 	help
 	  ARG hook layer. Zero policy. Required by CONFIG_SCHAD_ARG_KMM.
 KCONFIG
-            echo "  ✓ SCHAD_ARG added to Kconfig"
+            echo "✓ SCHAD_ARG added to Kconfig"
           else
-            echo "  ✓ SCHAD_ARG already in Kconfig"
+            echo "✓ SCHAD_ARG already in Kconfig"
           fi
 
-          echo ""
-          echo "=== Step 3: add arg_hook.o to kernel/sched build file ==="
-          # Samsung ممکنه Kbuild داشته باشه به جای Makefile
+          # ── 3. Kbuild یا Makefile ─────────────────────────────────
           if [ -f "$SCHED/Kbuild" ]; then
             BUILD_FILE="$SCHED/Kbuild"
-            echo "  Using Kbuild"
           else
             BUILD_FILE="$SCHED/Makefile"
-            echo "  Using Makefile"
           fi
-
           if ! grep -q "arg_hook" "$BUILD_FILE"; then
-            echo "obj-\$(CONFIG_SCHAD_ARG) += arg_hook.o" >> "$BUILD_FILE"
-            echo "  ✓ arg_hook.o added to $BUILD_FILE"
+            echo 'obj-$(CONFIG_SCHAD_ARG) += arg_hook.o' >> "$BUILD_FILE"
+            echo "✓ arg_hook.o added to $(basename $BUILD_FILE)"
           else
-            echo "  ✓ arg_hook.o already in $BUILD_FILE"
+            echo "✓ arg_hook.o already in $(basename $BUILD_FILE)"
           fi
 
-          echo ""
-          echo "=== Step 4: add hook call-sites to kernel/sched/core.c ==="
-          # enqueue_task hook
-          if ! grep -q "arg_call_enqueue" "$SCHED/core.c"; then
-            # بعد از sched_info_queued و قبل از sched_class->enqueue_task
-            sed -i 's/p->sched_class->enqueue_task(rq, p, flags);/#ifdef CONFIG_SCHAD_ARG\n\targ_call_enqueue(rq, p);\n#endif\n\tp->sched_class->enqueue_task(rq, p, flags);/' \
-              "$SCHED/core.c"
-            echo "  ✓ enqueue hook added"
-          else
-            echo "  ✓ enqueue hook already in core.c"
-          fi
+          # ── 4. Python patch روی sched.h و core.c ─────────────────
+          python3 << 'PYEOF'
+import sys
 
-          # pick_next_task hook — قبل از اولین class = &fair_sched_class
-          if ! grep -q "arg_call_pick_next" "$SCHED/core.c"; then
-            sed -i '/const struct sched_class \*class = &fair_sched_class;/{
-              i\#ifdef CONFIG_SCHAD_ARG
-              i\	if (!rq->rt.rt_nr_running) {
-              i\		struct task_struct *arg_p = arg_call_pick_next(rq);
-              i\		if (arg_p) return arg_p;
-              i\	}
-              i\#endif
-            }' "$SCHED/core.c"
-            echo "  ✓ pick_next hook added"
-          else
-            echo "  ✓ pick_next hook already in core.c"
-          fi
+SCHED = "kernel/sched"
 
-          echo ""
-          echo "=== Step 5: add extern declarations to kernel/sched/sched.h ==="
-          if ! grep -q "arg_call_pick_next" "$SCHED/sched.h"; then
-            cat >> "$SCHED/sched.h" << 'SCHED_H'
-
-/* ARG Scheduler Hook — added by CI */
+# ── sched.h: insert قبل از آخرین #endif ────────────────────────────
+# BUG FIX: append ساده کد رو بعد از #endif میذاشت (خارج از guard)
+ARG_SCHED_H = """
+/* ARG Scheduler Hook declarations */
 #ifdef CONFIG_SCHAD_ARG
 extern bool arg_enabled;
 extern struct task_struct *(*arg_pick_next_hook)(struct rq *rq);
@@ -210,38 +228,105 @@ extern void (*arg_enqueue_hook)(struct rq *rq, struct task_struct *p);
 extern void (*arg_wakeup_hook)(struct rq *rq, struct task_struct *p);
 extern void (*arg_update_load_hook)(void);
 
-static __always_inline struct task_struct *arg_call_pick_next(struct rq *rq)
+static __always_inline struct task_struct *
+arg_call_pick_next(struct rq *rq)
 {
-	struct task_struct *(*fn)(struct rq *);
-	if (!smp_load_acquire(&arg_enabled))
-		return NULL;
-	fn = smp_load_acquire(&arg_pick_next_hook);
-	return fn ? fn(rq) : NULL;
+\tstruct task_struct *(*fn)(struct rq *);
+\tif (!smp_load_acquire(&arg_enabled))
+\t\treturn NULL;
+\tfn = smp_load_acquire(&arg_pick_next_hook);
+\treturn fn ? fn(rq) : NULL;
 }
-static __always_inline void arg_call_enqueue(struct rq *rq, struct task_struct *p)
+static __always_inline void
+arg_call_enqueue(struct rq *rq, struct task_struct *p)
 {
-	void (*fn)(struct rq *, struct task_struct *);
-	if (!smp_load_acquire(&arg_enabled))
-		return;
-	fn = smp_load_acquire(&arg_enqueue_hook);
-	if (fn) fn(rq, p);
+\tvoid (*fn)(struct rq *, struct task_struct *);
+\tif (!smp_load_acquire(&arg_enabled))
+\t\treturn;
+\tfn = smp_load_acquire(&arg_enqueue_hook);
+\tif (fn) fn(rq, p);
 }
 #else
-static __always_inline struct task_struct *arg_call_pick_next(struct rq *rq) { return NULL; }
-static __always_inline void arg_call_enqueue(struct rq *rq, struct task_struct *p) {}
+static __always_inline struct task_struct *
+arg_call_pick_next(struct rq *rq) { return NULL; }
+static __always_inline void
+arg_call_enqueue(struct rq *rq, struct task_struct *p) {}
 #endif /* CONFIG_SCHAD_ARG */
-SCHED_H
-            echo "  ✓ sched.h updated"
-          else
-            echo "  ✓ sched.h already updated"
-          fi
+"""
+
+with open(f"{SCHED}/sched.h", "r") as f:
+    content = f.read()
+
+if "arg_call_pick_next" not in content:
+    # آخرین #endif رو پیدا کن و قبلش insert کن
+    idx = content.rfind("#endif")
+    if idx == -1:
+        print("ERROR: no #endif found in sched.h")
+        sys.exit(1)
+    content = content[:idx] + ARG_SCHED_H + content[idx:]
+    with open(f"{SCHED}/sched.h", "w") as f:
+        f.write(content)
+    print("✓ sched.h patched (before last #endif)")
+else:
+    print("✓ sched.h already patched")
+
+# ── core.c: enqueue hook ───────────────────────────────────────────
+with open(f"{SCHED}/core.c", "r") as f:
+    content = f.read()
+
+TARGET_ENQ = "\tp->sched_class->enqueue_task(rq, p, flags);"
+HOOK_ENQ = (
+    "#ifdef CONFIG_SCHAD_ARG\n"
+    "\targ_call_enqueue(rq, p);\n"
+    "#endif\n"
+    + TARGET_ENQ
+)
+
+if "arg_call_enqueue" not in content:
+    if TARGET_ENQ in content:
+        # فقط اولین occurrence رو جایگزین کن
+        content = content.replace(TARGET_ENQ, HOOK_ENQ, 1)
+        print("✓ enqueue hook added to core.c")
+    else:
+        print("WARNING: enqueue_task target not found — manual patch needed")
+else:
+    print("✓ enqueue hook already in core.c")
+
+# ── core.c: pick_next hook ─────────────────────────────────────────
+TARGET_PICK = "\tconst struct sched_class *class = &fair_sched_class;"
+HOOK_PICK = (
+    "#ifdef CONFIG_SCHAD_ARG\n"
+    "\tif (!rq->rt.rt_nr_running) {\n"
+    "\t\tstruct task_struct *arg_p = arg_call_pick_next(rq);\n"
+    "\t\tif (arg_p) return arg_p;\n"
+    "\t}\n"
+    "#endif\n"
+    + TARGET_PICK
+)
+
+if "arg_call_pick_next" not in content:
+    if TARGET_PICK in content:
+        content = content.replace(TARGET_PICK, HOOK_PICK, 1)
+        print("✓ pick_next hook added to core.c")
+    else:
+        print("WARNING: pick_next target not found — manual patch needed")
+else:
+    print("✓ pick_next hook already in core.c")
+
+with open(f"{SCHED}/core.c", "w") as f:
+    f.write(content)
+
+print("Done.")
+PYEOF
 
           echo ""
           echo "=== Verification ==="
-          echo "arg_hook.c: $(ls -lh $SCHED/arg_hook.c)"
-          echo "Kconfig SCHAD_ARG: $(grep -c SCHAD_ARG $SCHED/Kconfig) occurrences"
-          echo "Build file arg_hook: $(grep arg_hook $BUILD_FILE)"
+          ls -lh "$SCHED/arg_hook.c"
+          grep -c "SCHAD_ARG" "$SCHED/Kconfig"
+          grep "arg_hook" "$BUILD_FILE"
+          grep -c "arg_call_pick_next\|arg_call_enqueue" "$SCHED/sched.h"
 
+      # ── STEP 3: Build kernel ───────────────────────────────────────
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
@@ -263,29 +348,35 @@ SCHED_H
           export DEVICE_ID=A12s
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
+              >> arch/arm64/configs/$DEFCONFIG
           fi
 
           bash build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
+          # ── Diagnostic ─────────────────────────────────────────────
           echo ""
           echo "=== CONFIG_SCHAD_ARG in .config ==="
-          grep "SCHAD_ARG" .config || echo "NOT FOUND — inject step failed"
+          grep "SCHAD_ARG" .config || echo "NOT FOUND"
 
           echo ""
-          echo "=== arg symbols in Module.symvers ==="
+          echo "=== arg + runqueues in Module.symvers ==="
           grep -E "arg_enabled|arg_pick_next|arg_enqueue|arg_wakeup|arg_update|runqueues" \
-            Module.symvers 2>/dev/null || echo "NOT FOUND"
+            Module.symvers 2>/dev/null || echo "NOT FOUND — arg_hook.c not compiled"
 
+          # BUG4 FIX: build_config.txt در kernel_root هست نه arg/
           mv .config build_config.txt || true
+
           gitsha1=$(git rev-parse --short HEAD)
           buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
+      # ── STEP 4: Build ARG module ───────────────────────────────────
       - name: Build ARG kernel module (arg_sched.ko)
         working-directory: kernel_root
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
+
           make -C "$GITHUB_WORKSPACE/kernel_root"                                  \
                M="$GITHUB_WORKSPACE/kernel_root/arg"                               \
                ARCH=arm64                                                           \
@@ -297,13 +388,16 @@ SCHED_H
                -j$(nproc --all)                                                    \
                modules
 
+          echo ""
           echo "=== .ko ==="
           find "$GITHUB_WORKSPACE/kernel_root/arg" -name "*.ko" -exec ls -lh {} \;
 
           echo ""
-          echo "=== undefined symbols ==="
+          echo "=== undefined ARG symbols (باید خالی باشه) ==="
           nm "$GITHUB_WORKSPACE/kernel_root/arg/arg_sched.ko" 2>/dev/null \
-            | grep "^ *U " | grep -E "arg_|runqueue" || echo "✓ all ARG symbols resolved"
+            | grep "^ *U " \
+            | grep -E "arg_|runqueue" \
+            || echo "✓ all ARG symbols resolved"
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
@@ -315,4 +409,4 @@ SCHED_H
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
             kernel_root/arg/arg_sched.ko
-            kernel_root/arg/build_config.txt
+            kernel_root/build_config.txt
