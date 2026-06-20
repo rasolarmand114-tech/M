@@ -126,12 +126,6 @@ jobs:
             "$ARG_DIR/arg_rust.o" > "$ARG_DIR/.arg_rust.o.cmd"
 
           test -f "$ARG_DIR/arg_rust.o" || { echo "ERROR: Rust build failed"; exit 1; }
-
-      - name: Inject ARG hook into kernel/sched/
-        working-directory: kernel_root
-        run: |
-          python3 arg/scripts/inject_sched.py
-
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
