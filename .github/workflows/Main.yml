@@ -19,7 +19,7 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          repository: rasolarmand114-tech/exlinux
+          repository: rasolarmand114-tech/exlinux-
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
