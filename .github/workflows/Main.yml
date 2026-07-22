@@ -10,7 +10,6 @@ on:
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
         type: boolean
-        required: true
 
 jobs:
   build:
@@ -34,7 +33,6 @@ jobs:
             tar perl wget curl lz4 libssl-dev
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
-
       - name: Recreate 12GB Swap
         run: |
           sudo swapoff -a || true
@@ -44,72 +42,55 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
-
-      - name: Fetch Clang 11
-        working-directory: kernel_root
+      - name: Fetch toolchains (Clang 11 + GCC 4.9)
         run: |
-          mkdir -p toolchains
-          git clone --depth=1 -b clang-11 \
-            https://github.com/rsuntk/toolchains.git \
-            toolchains/clang
+          mkdir toolchains && cd toolchains
+          git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
+          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
+        working-directory: kernel_root
 
       - name: Set timezone (Asia/Kolkata)
         run: |
-          sudo rm -f /etc/localtime
+          sudo rm /etc/localtime
           sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
-
       - name: Build kernel
         id: buildKernel
-        working-directory: kernel_root
         run: |
-          export PATH="$PWD/toolchains/clang/bin:$PATH"
-          export LLVM=1
-          export LLVM_IAS=1
-          export CC=clang
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
-          export HOSTCC=clang
-          export HOSTCXX=clang++
-          export HOSTAR=llvm-ar
-          export HOSTLD=ld.lld
+          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          export CROSS_COMPILE=$(pwd)/toolchains/clang/bin/aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
-          unset CROSS_COMPILE
-          unset CROSS_COMPILE_COMPAT
-
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
-          export BUILD_START="$(date)"
+          export BUILD_START=`date`
           export IS_CI=true
+          
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
           export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
-
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
-            echo "Switching SELinux to Permissive mode..."
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> "arch/arm64/configs/$DEFCONFIG"
-            grep "PERMISSIVE" "arch/arm64/configs/$DEFCONFIG"
-            SELINUX_STATE="Permissive"
+          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
+          echo "Switching SELinux to Permissive mode..."
+          
+          # Set permissive mode in defconfig
+          echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+          grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
+    
+          SELINUX_STATE="Permissive"
           else
-            SELINUX_STATE="Enforcing"
+          SELINUX_STATE="Enforcing"
           fi
 
+          # Show final SELinux state
           echo "SELinux is set to: $SELINUX_STATE"
-          echo "Clang version:"
-          clang --version
 
-          bash "$PWD/build_kernel.sh" \
-            kernel \
-            --jobs "$(nproc --all)" \
-            "$DEFCONFIG"
+          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
-          cp .config build_config.txt
-          gitsha1="$(git rev-parse --short HEAD)"
-          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
-          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
+        
+
+  
+          mv .config build_config.txt
+          gitsha1=$(git rev-parse --short HEAD)
+          buildDetails="`make kernelversion`-`echo $DEVICE`_`echo $gitsha1`-`date +'%Y%m%d%H%M%S'`" && echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
+        working-directory: kernel_root   
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
