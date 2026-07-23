@@ -83,6 +83,9 @@ jobs:
           echo "AArch64 binutils:"
           aarch64-linux-gnu-ld --version
           echo
+          echo "SELinux: $SELINUX_STATE"
+
+          
           echo "=== Active tools ==="
           which gcc
           which ld
@@ -94,7 +97,7 @@ jobs:
           clang --version
           aarch64-linux-gnu-ld --version
 
-          echo "SELinux: $SELINUX_STATE"
+          
 
           
           
