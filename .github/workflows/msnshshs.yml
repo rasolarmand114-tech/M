@@ -58,11 +58,12 @@ jobs:
         run: |
           set -e
 
+          export HOSTCC=gcc
+          export HOSTCXX=g++
+          export HOSTAR=ar
+          export HOSTLDFLAGS="-fuse-ld=/usr/bin/ld"
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
           export PATH="$TOOLCHAIN/bin:$PATH"
-          export HOSTCC=/usr/bin/gcc
-          export HOSTCXX=/usr/bin/g++
-          export HOSTLD=/usr/bin/ld.bfd
           export ARCH=arm64
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
@@ -90,7 +91,7 @@ jobs:
 
           
           
-          make -j64 O=aout ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip HOSTCC=clang HOSTCXX=clang++ HOSTAR=llvm-ar HOSTLD=ld.lld CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 exlinux_defconfig 
+          make -j64 O=aout ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip  CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 exlinux_defconfig 
 
           cp .config build_config.txt
 
