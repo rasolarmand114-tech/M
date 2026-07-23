@@ -140,44 +140,19 @@ jobs:
           # ============================================================
           # Proton Clang main LLVM/Clang binaries
           # ============================================================
+          export TOOLCHAIN="$PWD/toolchains/proton-clang"
           export PATH="$TOOLCHAIN/bin:$PATH"
-
-          # ============================================================
-          # ARM64 target cross tools
-          #
-          # Expected layout:
-          # toolchains/proton-clang/aarch64-linux-gnu/bin/
-          #   as
-          #   ld
-          #   ar
-          #   nm
-          #   objcopy
-          #   objdump
-          #   readelf
-          #   strip
-          # ============================================================
-          export CROSS_COMPILE="$TOOLCHAIN/aarch64-linux-gnu/bin/"
-
-          # ============================================================
-          # LLVM Kbuild
-          # ============================================================
+          export CC=clang
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export READELF=llvm-readelf
+          export STRIP=llvm-strip
           export LLVM=1
           export LLVM_IAS=1
-
-          # ============================================================
-          # Host compiler
-          # ============================================================
-          export HOSTCC="$TOOLCHAIN/bin/clang"
-          export HOSTCXX="$TOOLCHAIN/bin/clang++"
-
-          # Do NOT globally export LD=ld.lld here.
-          # Kbuild's LLVM=1 handles target linker selection.
-          # Keeping LD global can affect HOSTCC linking.
-          unset LD
-
-          # ============================================================
-          # Build metadata
-          # ============================================================
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
           export BUILD_START="$(date)"
