@@ -30,7 +30,9 @@ jobs:
           sudo apt update -y
           sudo apt install -y \
             bc cpio flex bison git python-is-python3 \
-            tar perl wget curl lz4 libssl-dev
+            tar perl wget curl lz4 libssl-dev \
+            zstd
+
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
 
@@ -38,19 +40,85 @@ jobs:
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
-          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo fallocate -l 12G /swapfile || \
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+
           free -h
 
-      - name: Fetch LLVM/Clang 11 toolchain
+      - name: Fetch Proton Clang 11.0.0
+        working-directory: kernel_root
         run: |
           mkdir -p toolchains
-          git clone --depth=1 -b clang-11 \
-            https://github.com/rsuntk/toolchains.git \
-            toolchains/clang
+          cd toolchains
+
+          wget -O proton_clang.tar.zst \
+            https://github.com/kdrag0n/proton-clang-build/releases/download/20200117/proton_clang-11.0.0-20200117.tar.zst
+
+          mkdir -p proton-clang
+
+          tar --use-compress-program=unzstd \
+            -xf proton_clang.tar.zst \
+            -C proton-clang \
+            --strip-components=1
+
+          rm -f proton_clang.tar.zst
+
+      - name: Verify Proton Clang toolchain
         working-directory: kernel_root
+        run: |
+          export PATH="$PWD/toolchains/proton-clang/bin:$PATH"
+
+          echo "========================================"
+          echo " Proton Clang / LLVM Toolchain"
+          echo "========================================"
+
+          echo "=== clang ==="
+          command -v clang
+          clang --version
+
+          echo "=== clang++ ==="
+          command -v clang++
+          clang++ --version
+
+          echo "=== llvm-as ==="
+          command -v llvm-as
+          llvm-as --version
+
+          echo "=== llvm-ar ==="
+          command -v llvm-ar
+          llvm-ar --version
+
+          echo "=== llvm-nm ==="
+          command -v llvm-nm
+          llvm-nm --version
+
+          echo "=== llvm-objcopy ==="
+          command -v llvm-objcopy
+          llvm-objcopy --version
+
+          echo "=== llvm-objdump ==="
+          command -v llvm-objdump
+          llvm-objdump --version
+
+          echo "=== llvm-readelf ==="
+          command -v llvm-readelf
+          llvm-readelf --version
+
+          echo "=== llvm-strip ==="
+          command -v llvm-strip
+          llvm-strip --version
+
+          echo "=== ld.lld ==="
+          command -v ld.lld
+          ld.lld --version
+
+          echo "========================================"
+          echo " LLVM toolchain verification complete"
+          echo "========================================"
 
       - name: Set timezone (Asia/Kolkata)
         run: |
@@ -59,29 +127,32 @@ jobs:
 
       - name: Build kernel
         id: buildKernel
+        working-directory: kernel_root
         run: |
-          export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          export PATH="$PWD/toolchains/proton-clang/bin:$PATH"
 
-          # Pure LLVM/Clang build
+          # LLVM / Clang kernel build
           export LLVM=1
           export LLVM_IAS=1
 
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
-          export BUILD_START=`date`
+          export BUILD_START="$(date)"
           export IS_CI=true
-          
+
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
           export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
 
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
             echo "Switching SELinux to Permissive mode..."
-          
+
             # Set permissive mode in defconfig
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
+              >> arch/arm64/configs/$DEFCONFIG
+
             grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
-    
+
             SELINUX_STATE="Permissive"
           else
             SELINUX_STATE="Enforcing"
@@ -90,29 +161,41 @@ jobs:
           # Show final SELinux state
           echo "SELinux is set to: $SELINUX_STATE"
 
-          # Verify LLVM toolchain
-          echo "=== Clang ==="
+          echo "========================================"
+          echo " Build configuration"
+          echo "========================================"
+
+          echo "Compiler:"
           clang --version
 
-          echo "=== LLVM tools ==="
+          echo "LLVM:"
           llvm-as --version
-          llvm-ar --version
-          llvm-nm --version
-          llvm-objcopy --version
-          llvm-objdump --version
-          llvm-readelf --version
-          llvm-strip --version
+
+          echo "Linker:"
           ld.lld --version
 
-          # Build with LLVM/Clang
-          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+          echo "LLVM mode: $LLVM"
+          echo "LLVM IAS: $LLVM_IAS"
+          echo "Architecture: arm64"
+          echo "Defconfig: $DEFCONFIG"
+          echo "SELinux: $SELINUX_STATE"
+
+          echo "========================================"
+          echo " Starting kernel build"
+          echo "========================================"
+
+          bash ./build_kernel.sh \
+            kernel \
+            --jobs "$(nproc --all)" \
+            "$DEFCONFIG"
 
           mv .config build_config.txt
 
-          gitsha1=$(git rev-parse --short HEAD)
-          buildDetails="`make kernelversion`-`echo $DEVICE`_`echo $gitsha1`-`date +'%Y%m%d%H%M%S'`" && echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
+          gitsha1="$(git rev-parse --short HEAD)"
 
-        working-directory: kernel_root
+          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date '+%Y%m%d%H%M%S')"
+
+          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
