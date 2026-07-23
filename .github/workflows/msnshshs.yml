@@ -103,7 +103,7 @@ jobs:
 
           
           
-          make -j64 O=aout ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip HOSTCC=/usr/bin/gcc  HOSTCXX=/usr/bin/g++   HOSTLD=/usr/bin/ld    CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 exlinux_defconfig 
+          make -j64  ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip HOSTCC=/usr/bin/gcc  HOSTCXX=/usr/bin/g++   HOSTLD=/usr/bin/ld    CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 exlinux_defconfig 
 
           cp .config build_config.txt
 
