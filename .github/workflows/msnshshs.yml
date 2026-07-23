@@ -43,7 +43,8 @@ jobs:
             curl \
             lz4 \
             libssl-dev \
-            zstd
+            zstd \
+            gcc 
 
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
@@ -158,8 +159,8 @@ jobs:
           export LLVM=1
           export LLVM_IAS=1
           # Host compiler
-          export HOSTCC="$TOOLCHAIN/bin/clang"
-          export HOSTCXX="$TOOLCHAIN/bin/clang++"
+          export HOSTCC="usr/bin/x86_64_linux_gnu_gcc"
+          export HOSTCXX="usr/bin/x86_64_linux_gnu_g++"
           # Force system assembler for HOST builds
           export AS=/usr/bin/as
           export KBUILD_BUILD_USER="exlinux"
