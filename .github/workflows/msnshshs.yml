@@ -60,14 +60,17 @@ jobs:
           
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
           export PATH="$TOOLCHAIN/bin:$PATH"
-          export PLATFORM_VERSION=13
-          export ANDROID_MAJOR_VERSION=t
+          export  HOSTCC="/usr/bin/gcc"
+          export  HOSTCXX="/usr/bin/g++"
+          export  HOSTLD="/usr/bin/ld"
           export ARCH=arm64
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
-
           export KBUILD_BUILD_USER=exlinux
           export KBUILD_BUILD_HOST=github
+          export BUILD_START=`date`
+          export IS_CI=true
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
 
           if [[ "${{ inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
@@ -75,43 +78,10 @@ jobs:
             SELINUX_STATE=Permissive
           else
             SELINUX_STATE=Enforcing
-          fi
-
-          echo "========================================"
-          echo " Proton Clang"
-          echo "========================================"
-          clang --version
-          echo
-          echo "AArch64 binutils:"
-          aarch64-linux-gnu-ld --version
-          echo
+           fi
           echo "SELinux: $SELINUX_STATE"
-
+          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
           
-          echo "=== Active tools ==="
-          which gcc
-          which ld
-          which clang
-          which aarch64-linux-gnu-ld
-          echo "=== Versions ==="
-          gcc --version
-          ld --version
-          clang --version
-          aarch64-linux-gnu-ld --version
-
-          
-
-          
-          
-          make -j64  ARCH=arm64 CC=clang LD=ld.lld AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip HOSTCC=/usr/bin/gcc     HOSTCXX=/usr/bin/g++   HOSTLD=/usr/bin/ld    CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu- LLVM=1 LLVM_IAS=1 exlinux_defconfig 
-
-   
-          gitsha1="$(git rev-parse --short HEAD)"
-          kernel_version="$(make kernelversion)"
-          buildDetails="${kernel_version}-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
-
-          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
-
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
