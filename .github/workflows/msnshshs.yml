@@ -60,9 +60,10 @@ jobs:
           
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
           export PATH="$TOOLCHAIN/bin:$PATH"
-          export  HOSTCC="/usr/bin/gcc"
-          export  HOSTCXX="/usr/bin/g++"
-          export  HOSTLD="/usr/bin/ld"
+          export  HOSTCC=  "/usr/bin/gcc"
+          export  HOSTCXX= "/usr/bin/g++"
+          export  HOSTLD=  "/usr/bin/ld"
+          export  HOSTAS="/usr/bin/as"
           export ARCH=arm64
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
