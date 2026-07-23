@@ -141,18 +141,27 @@ jobs:
           # Proton Clang main LLVM/Clang binaries
           # ============================================================
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
+          # Clang/LLVM اصلی Proton
           export PATH="$TOOLCHAIN/bin:$PATH"
-          export CC=clang
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export READELF=llvm-readelf
-          export STRIP=llvm-strip
+          # Kernel target
+          export CC="$TOOLCHAIN/bin/clang"
+          export CROSS_COMPILE="$TOOLCHAIN/bin/aarch64-linux-gnu-"
+          # LLVM tools
+          export LD="$TOOLCHAIN/bin/ld.lld"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export NM="$TOOLCHAIN/bin/llvm-nm"
+          export OBJCOPY="$TOOLCHAIN/bin/llvm-objcopy"
+          export OBJDUMP="$TOOLCHAIN/bin/llvm-objdump"
+          export READELF="$TOOLCHAIN/bin/llvm-readelf"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+          # LLVM Kbuild
           export LLVM=1
           export LLVM_IAS=1
+          # Host compiler
+          export HOSTCC="$TOOLCHAIN/bin/clang"
+          export HOSTCXX="$TOOLCHAIN/bin/clang++"
+          # Force system assembler for HOST builds
+          export AS=/usr/bin/as
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
           export BUILD_START="$(date)"
