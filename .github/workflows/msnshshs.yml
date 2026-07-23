@@ -7,9 +7,12 @@ on:
         description: Kernel branch
         default: 'main'
         required: true
+        type: string
 
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
+        required: false
+        default: false
         type: boolean
 
 jobs:
@@ -17,38 +20,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # Checkout Kernel
+      # ============================================================
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
           repository: rasolarmand114-tech/exlinux-
           path: kernel_root
-          ref: ${{ github.event.inputs.BRANCH }}
+          ref: ${{ inputs.BRANCH }}
           fetch-depth: 0
 
-      - name: Prepare dependencies + fetch tags
+
+      # ============================================================
+      # Install Dependencies
+      # ============================================================
+      - name: Install Build Dependencies
         working-directory: kernel_root
         run: |
-          sudo apt update -y
+          sudo apt-get update
 
-          sudo apt install -y \
+          sudo apt-get install -y \
             bc \
+            bison \
+            build-essential \
             cpio \
             flex \
-            bison \
             git \
-            python-is-python3 \
-            tar \
-            perl \
-            wget \
-            curl \
-            lz4 \
             libssl-dev \
-            zstd \
-            gcc 
+            lz4 \
+            perl \
+            python3 \
+            tar \
+            wget \
+            curl
 
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --tags --force
 
+      # ============================================================
+      # Create Swap
+      # ============================================================
       - name: Recreate 12GB Swap
         run: |
           sudo swapoff -a || true
@@ -63,205 +74,204 @@ jobs:
 
           free -h
 
-      - name: Fetch Proton Clang 11.0.0
+
+      # ============================================================
+      # Download Proton Clang 20200711
+      # ============================================================
+      - name: Fetch Proton Clang 20200711
         working-directory: kernel_root
         run: |
           mkdir -p toolchains
 
-          wget -O toolchains/proton_clang.tar.zst \
-            https://github.com/kdrag0n/proton-clang-build/releases/download/20200117/proton_clang-11.0.0-20200117.tar.zst
+          git clone \
+            --depth=1 \
+            --branch 20200711 \
+            https://github.com/kdrag0n/proton-clang.git \
+            toolchains/proton-clang
 
-          mkdir -p toolchains/proton-clang
 
-          tar \
-            --use-compress-program=unzstd \
-            -xf toolchains/proton_clang.tar.zst \
-            -C toolchains/proton-clang \
-            --strip-components=1
-
-          rm -f toolchains/proton_clang.tar.zst
-
-      - name: Verify Proton Clang Toolchain
-        working-directory: kernel_root
+      # ============================================================
+      # Setup Timezone
+      # ============================================================
+      - name: Set timezone
         run: |
-          export TOOLCHAIN="$PWD/toolchains/proton-clang"
+          sudo timedatectl set-timezone Asia/Kolkata
 
-          # Main Clang / LLVM binaries
-          export PATH="$TOOLCHAIN/bin:$PATH"
 
-          echo "========================================"
-          echo " Proton Clang Toolchain"
-          echo "========================================"
-
-          echo
-          echo "=== Clang ==="
-          "$TOOLCHAIN/bin/clang" --version
-
-          echo
-          echo "=== Clang++ ==="
-          "$TOOLCHAIN/bin/clang++" --version
-
-          echo
-          echo "=== LLD ==="
-          "$TOOLCHAIN/bin/ld.lld" --version
-
-          echo
-          echo "=== LLVM tools ==="
-          "$TOOLCHAIN/bin/llvm-ar" --version
-          "$TOOLCHAIN/bin/llvm-nm" --version
-          "$TOOLCHAIN/bin/llvm-objcopy" --version
-          "$TOOLCHAIN/bin/llvm-objdump" --version
-          "$TOOLCHAIN/bin/llvm-readelf" --version
-          "$TOOLCHAIN/bin/llvm-strip" --version
-
-          echo
-          echo "=== ARM64 toolchain ==="
-          ls -la "$TOOLCHAIN/aarch64-linux-gnu/bin/"
-
-          echo
-          echo "=== x86_64 Host toolchain ==="
-          ls -la "$TOOLCHAIN/x86_64-pc-linux-gnu/bin/"
-
-          echo
-          echo "========================================"
-          echo " Toolchain verification complete"
-          echo "========================================"
-
-      - name: Set timezone (Asia/Kolkata)
-        run: |
-          sudo rm -f /etc/localtime
-          sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
-
-      - name: Build kernel
+      # ============================================================
+      # Build Kernel
+      # ============================================================
+      - name: Build Kernel
         id: buildKernel
         working-directory: kernel_root
+        shell: bash
         run: |
-          export TOOLCHAIN="$PWD/toolchains/proton-clang"
 
-          # ============================================================
-          # Proton Clang main LLVM/Clang binaries
-          # ============================================================
+          set -e
+
+          # --------------------------------------------------------
+          # Basic variables
+          # --------------------------------------------------------
+
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
-          # Clang/LLVM اصلی Proton
-          export PATH="$TOOLCHAIN/bin:$PATH"
-          # Kernel target
-          export CC="$TOOLCHAIN/bin/clang"
-          export CROSS_COMPILE="$TOOLCHAIN/bin/aarch64-linux-gnu-"
-          # LLVM tools
-          export LD="$TOOLCHAIN/bin/ld.lld"
-          export AR="$TOOLCHAIN/bin/llvm-ar"
-          export NM="$TOOLCHAIN/bin/llvm-nm"
-          export OBJCOPY="$TOOLCHAIN/bin/llvm-objcopy"
-          export OBJDUMP="$TOOLCHAIN/bin/llvm-objdump"
-          export READELF="$TOOLCHAIN/bin/llvm-readelf"
-          export STRIP="$TOOLCHAIN/bin/llvm-strip"
-          # LLVM Kbuild
-          export LLVM=1
-          export LLVM_IAS=1
-          # Host compiler
-          export HOSTCC="usr/bin/x86_64-linux-gnu-gcc"
-          export HOSTCXX="usr/bin/x86_64-linux-gnu-g++"
-          # Force system assembler for HOST builds
-          export AS=/usr/bin/as
-          export KBUILD_BUILD_USER="exlinux"
-          export KBUILD_BUILD_HOST="github"
-          export BUILD_START="$(date)"
-          export IS_CI=true
 
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
-          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
 
-          # ============================================================
-          # SELinux
-          # ============================================================
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
+          export KBUILD_BUILD_USER="exlinux"
+          export KBUILD_BUILD_HOST="github"
+
+          export IS_CI=true
+
+          export ARCH=arm64
+
+
+          # --------------------------------------------------------
+          # Proton Clang
+          #
+          # According to Proton Clang documentation:
+          #
+          #   export PATH="$HOME/toolchains/proton-clang/bin:$PATH"
+          #
+          # No CLANG_TRIPLE
+          # No LD_LIBRARY_PATH
+          # No separate GCC toolchain
+          # --------------------------------------------------------
+
+          export PATH="$TOOLCHAIN/bin:$PATH"
+
+
+          # --------------------------------------------------------
+          # Kernel configuration
+          # --------------------------------------------------------
+
+          if [[ "${{ inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
+
             echo "Switching SELinux to Permissive mode..."
 
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
               >> "arch/arm64/configs/$DEFCONFIG"
 
-            grep "PERMISSIVE" "arch/arm64/configs/$DEFCONFIG"
-
             SELINUX_STATE="Permissive"
+
           else
+
             SELINUX_STATE="Enforcing"
+
           fi
 
-          echo "SELinux is set to: $SELINUX_STATE"
 
-          # ============================================================
-          # Verify final environment
-          # ============================================================
+          # --------------------------------------------------------
+          # Toolchain information
+          # --------------------------------------------------------
+
           echo "========================================"
-          echo " Build configuration"
+          echo " Proton Clang Build Configuration"
           echo "========================================"
 
           echo "Toolchain:"
           echo "$TOOLCHAIN"
 
           echo
-          echo "Compiler:"
-          "$TOOLCHAIN/bin/clang" --version
+
+          echo "Clang:"
+          which clang
+          clang --version
 
           echo
-          echo "Linker:"
-          "$TOOLCHAIN/bin/ld.lld" --version
+
+          echo "AArch64 CROSS_COMPILE:"
+          which aarch64-linux-gnu-ld
+          aarch64-linux-gnu-ld --version
 
           echo
-          echo "LLVM mode:"
-          echo "$LLVM"
+
+          echo "LLVM:"
+          which llvm-ar || true
+          which llvm-nm || true
+          which llvm-objcopy || true
+          which llvm-objdump || true
+          which llvm-strip || true
 
           echo
-          echo "LLVM IAS:"
-          echo "$LLVM_IAS"
 
-          echo
-          echo "Host compiler:"
-          echo "$HOSTCC"
-
-          echo
-          echo "ARM64 CROSS_COMPILE:"
-          echo "$CROSS_COMPILE"
-
-          echo
           echo "Architecture:"
-          echo "arm64"
+          echo "$ARCH"
 
-          echo
           echo "Defconfig:"
           echo "$DEFCONFIG"
 
-          echo
           echo "SELinux:"
           echo "$SELINUX_STATE"
 
+
+          # --------------------------------------------------------
+          # Generate defconfig
+          #
+          # Proton documentation:
+          #
+          #   CC=clang
+          #   CROSS_COMPILE=aarch64-linux-gnu-
+          #
+          # These are passed directly to make.
+          # --------------------------------------------------------
+
           echo
           echo "========================================"
-          echo " Starting kernel build"
+          echo " Generating Kernel Configuration"
           echo "========================================"
 
-          bash ./build_kernel.sh \
-            kernel \
-            --jobs "$(nproc --all)" \
+          make \
+            ARCH="$ARCH" \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
             "$DEFCONFIG"
 
-          # Save final kernel configuration
+
+          # --------------------------------------------------------
+          # Build Kernel
+          # --------------------------------------------------------
+
+          echo
+          echo "========================================"
+          echo " Starting Kernel Build"
+          echo "========================================"
+
+          make \
+            ARCH="$ARCH" \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            -j"$(nproc --all)"
+
+
+          # --------------------------------------------------------
+          # Save final config
+          # --------------------------------------------------------
+
           cp .config build_config.txt
 
+
+          # --------------------------------------------------------
           # Build information
+          # --------------------------------------------------------
+
           gitsha1="$(git rev-parse --short HEAD)"
 
-          buildDetails="$(
-            make kernelversion
-          )-${DEVICE_ID}_${gitsha1}-$(date '+%Y%m%d%H%M%S')"
+          kernel_version="$(make kernelversion)"
+
+          buildDetails="${kernel_version}-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
+
+      # ============================================================
+      # Upload Kernel
+      # ============================================================
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+
           path: |
             kernel_root/arch/arm64/boot/Image
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
