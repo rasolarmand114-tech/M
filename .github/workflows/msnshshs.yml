@@ -40,6 +40,7 @@ jobs:
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
+
           sudo fallocate -l 12G /swapfile || \
             sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
 
@@ -67,57 +68,91 @@ jobs:
 
           rm -f proton_clang.tar.zst
 
-      - name: Verify Proton Clang toolchain
+      - name: Verify Proton Clang
         working-directory: kernel_root
         run: |
-          export PATH="$PWD/toolchains/proton-clang/bin:$PATH"
+          export TOOLCHAIN="$PWD/toolchains/proton-clang"
+
+          export PATH="$TOOLCHAIN/bin:$PATH"
+
+          # Proton Clang bundled binutils libraries
+          export LD_LIBRARY_PATH="$TOOLCHAIN/lib:$TOOLCHAIN/lib64:${LD_LIBRARY_PATH:-}"
 
           echo "========================================"
-          echo " Proton Clang / LLVM Toolchain"
+          echo " Proton Clang Toolchain"
           echo "========================================"
 
+          echo "Toolchain:"
+          echo "$TOOLCHAIN"
+
+          echo
           echo "=== clang ==="
           command -v clang
           clang --version
 
+          echo
           echo "=== clang++ ==="
           command -v clang++
           clang++ --version
 
+          echo
           echo "=== llvm-as ==="
           command -v llvm-as
           llvm-as --version
 
+          echo
           echo "=== llvm-ar ==="
           command -v llvm-ar
           llvm-ar --version
 
+          echo
           echo "=== llvm-nm ==="
           command -v llvm-nm
           llvm-nm --version
 
+          echo
           echo "=== llvm-objcopy ==="
           command -v llvm-objcopy
           llvm-objcopy --version
 
+          echo
           echo "=== llvm-objdump ==="
           command -v llvm-objdump
           llvm-objdump --version
 
+          echo
           echo "=== llvm-readelf ==="
           command -v llvm-readelf
           llvm-readelf --version
 
+          echo
           echo "=== llvm-strip ==="
           command -v llvm-strip
           llvm-strip --version
 
+          echo
           echo "=== ld.lld ==="
           command -v ld.lld
           ld.lld --version
 
+          echo
+          echo "=== assembler ==="
+          command -v as
+          as --version || true
+
+          echo
+          echo "=== Proton binutils libraries ==="
+          find "$TOOLCHAIN" \
+            \( -name 'libopcodes*.so*' -o -name 'libbfd*.so*' \) \
+            -print
+
+          echo
+          echo "=== Dynamic dependencies of as ==="
+          ldd "$(command -v as)" || true
+
+          echo
           echo "========================================"
-          echo " LLVM toolchain verification complete"
+          echo " Proton Clang verification complete"
           echo "========================================"
 
       - name: Set timezone (Asia/Kolkata)
@@ -129,11 +164,27 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
-          export PATH="$PWD/toolchains/proton-clang/bin:$PATH"
+          export TOOLCHAIN="$PWD/toolchains/proton-clang"
 
-          # LLVM / Clang kernel build
+          export PATH="$TOOLCHAIN/bin:$PATH"
+
+          # Proton Clang bundled binutils runtime libraries
+          export LD_LIBRARY_PATH="$TOOLCHAIN/lib:$TOOLCHAIN/lib64:${LD_LIBRARY_PATH:-}"
+
+          # LLVM / Clang Kbuild configuration
           export LLVM=1
           export LLVM_IAS=1
+
+          # Explicit LLVM tools
+          export CC=clang
+          export CXX=clang++
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export READELF=llvm-readelf
+          export STRIP=llvm-strip
 
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
@@ -147,7 +198,6 @@ jobs:
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
             echo "Switching SELinux to Permissive mode..."
 
-            # Set permissive mode in defconfig
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
               >> arch/arm64/configs/$DEFCONFIG
 
@@ -158,28 +208,37 @@ jobs:
             SELINUX_STATE="Enforcing"
           fi
 
-          # Show final SELinux state
           echo "SELinux is set to: $SELINUX_STATE"
 
           echo "========================================"
           echo " Build configuration"
           echo "========================================"
 
+          echo "Toolchain: $TOOLCHAIN"
           echo "Compiler:"
           clang --version
 
+          echo
           echo "LLVM:"
           llvm-as --version
 
+          echo
           echo "Linker:"
           ld.lld --version
 
+          echo
+          echo "Assembler:"
+          command -v as
+          as --version || true
+
+          echo
           echo "LLVM mode: $LLVM"
           echo "LLVM IAS: $LLVM_IAS"
           echo "Architecture: arm64"
           echo "Defconfig: $DEFCONFIG"
           echo "SELinux: $SELINUX_STATE"
 
+          echo
           echo "========================================"
           echo " Starting kernel build"
           echo "========================================"
