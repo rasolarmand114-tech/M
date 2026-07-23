@@ -7,6 +7,7 @@ on:
         description: Kernel branch
         default: 'main'
         required: true
+
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
         type: boolean
@@ -28,9 +29,20 @@ jobs:
         working-directory: kernel_root
         run: |
           sudo apt update -y
+
           sudo apt install -y \
-            bc cpio flex bison git python-is-python3 \
-            tar perl wget curl lz4 libssl-dev \
+            bc \
+            cpio \
+            flex \
+            bison \
+            git \
+            python-is-python3 \
+            tar \
+            perl \
+            wget \
+            curl \
+            lz4 \
+            libssl-dev \
             zstd
 
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -54,110 +66,69 @@ jobs:
         working-directory: kernel_root
         run: |
           mkdir -p toolchains
-          cd toolchains
 
-          wget -O proton_clang.tar.zst \
+          wget -O toolchains/proton_clang.tar.zst \
             https://github.com/kdrag0n/proton-clang-build/releases/download/20200117/proton_clang-11.0.0-20200117.tar.zst
 
-          mkdir -p proton-clang
+          mkdir -p toolchains/proton-clang
 
-          tar --use-compress-program=unzstd \
-            -xf proton_clang.tar.zst \
-            -C proton-clang \
+          tar \
+            --use-compress-program=unzstd \
+            -xf toolchains/proton_clang.tar.zst \
+            -C toolchains/proton-clang \
             --strip-components=1
 
-          rm -f proton_clang.tar.zst
+          rm -f toolchains/proton_clang.tar.zst
 
-      - name: Verify Proton Clang
+      - name: Verify Proton Clang Toolchain
         working-directory: kernel_root
         run: |
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
 
+          # Main Clang / LLVM binaries
           export PATH="$TOOLCHAIN/bin:$PATH"
-
-          # Proton Clang bundled binutils libraries
-          export LD_LIBRARY_PATH="$TOOLCHAIN/lib:$TOOLCHAIN/lib64:${LD_LIBRARY_PATH:-}"
 
           echo "========================================"
           echo " Proton Clang Toolchain"
           echo "========================================"
 
-          echo "Toolchain:"
-          echo "$TOOLCHAIN"
+          echo
+          echo "=== Clang ==="
+          "$TOOLCHAIN/bin/clang" --version
 
           echo
-          echo "=== clang ==="
-          command -v clang
-          clang --version
+          echo "=== Clang++ ==="
+          "$TOOLCHAIN/bin/clang++" --version
 
           echo
-          echo "=== clang++ ==="
-          command -v clang++
-          clang++ --version
+          echo "=== LLD ==="
+          "$TOOLCHAIN/bin/ld.lld" --version
 
           echo
-          echo "=== llvm-as ==="
-          command -v llvm-as
-          llvm-as --version
+          echo "=== LLVM tools ==="
+          "$TOOLCHAIN/bin/llvm-ar" --version
+          "$TOOLCHAIN/bin/llvm-nm" --version
+          "$TOOLCHAIN/bin/llvm-objcopy" --version
+          "$TOOLCHAIN/bin/llvm-objdump" --version
+          "$TOOLCHAIN/bin/llvm-readelf" --version
+          "$TOOLCHAIN/bin/llvm-strip" --version
 
           echo
-          echo "=== llvm-ar ==="
-          command -v llvm-ar
-          llvm-ar --version
+          echo "=== ARM64 toolchain ==="
+          ls -la "$TOOLCHAIN/aarch64-linux-gnu/bin/"
 
           echo
-          echo "=== llvm-nm ==="
-          command -v llvm-nm
-          llvm-nm --version
-
-          echo
-          echo "=== llvm-objcopy ==="
-          command -v llvm-objcopy
-          llvm-objcopy --version
-
-          echo
-          echo "=== llvm-objdump ==="
-          command -v llvm-objdump
-          llvm-objdump --version
-
-          echo
-          echo "=== llvm-readelf ==="
-          command -v llvm-readelf
-          llvm-readelf --version
-
-          echo
-          echo "=== llvm-strip ==="
-          command -v llvm-strip
-          llvm-strip --version
-
-          echo
-          echo "=== ld.lld ==="
-          command -v ld.lld
-          ld.lld --version
-
-          echo
-          echo "=== assembler ==="
-          command -v as
-          as --version || true
-
-          echo
-          echo "=== Proton binutils libraries ==="
-          find "$TOOLCHAIN" \
-            \( -name 'libopcodes*.so*' -o -name 'libbfd*.so*' \) \
-            -print
-
-          echo
-          echo "=== Dynamic dependencies of as ==="
-          ldd "$(command -v as)" || true
+          echo "=== x86_64 Host toolchain ==="
+          ls -la "$TOOLCHAIN/x86_64-pc-linux-gnu/bin/"
 
           echo
           echo "========================================"
-          echo " Proton Clang verification complete"
+          echo " Toolchain verification complete"
           echo "========================================"
 
       - name: Set timezone (Asia/Kolkata)
         run: |
-          sudo rm /etc/localtime
+          sudo rm -f /etc/localtime
           sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
 
       - name: Build kernel
@@ -166,26 +137,47 @@ jobs:
         run: |
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
 
+          # ============================================================
+          # Proton Clang main LLVM/Clang binaries
+          # ============================================================
           export PATH="$TOOLCHAIN/bin:$PATH"
 
-          # Proton Clang bundled binutils runtime libraries
-          export LD_LIBRARY_PATH="$TOOLCHAIN/lib:$TOOLCHAIN/lib64:${LD_LIBRARY_PATH:-}"
+          # ============================================================
+          # ARM64 target cross tools
+          #
+          # Expected layout:
+          # toolchains/proton-clang/aarch64-linux-gnu/bin/
+          #   as
+          #   ld
+          #   ar
+          #   nm
+          #   objcopy
+          #   objdump
+          #   readelf
+          #   strip
+          # ============================================================
+          export CROSS_COMPILE="$TOOLCHAIN/aarch64-linux-gnu/bin/"
 
-          # LLVM / Clang Kbuild configuration
+          # ============================================================
+          # LLVM Kbuild
+          # ============================================================
           export LLVM=1
           export LLVM_IAS=1
 
-          # Explicit LLVM tools
-          export CC=clang
-          export CXX=clang++
-          export LD=ld.lld
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export READELF=llvm-readelf
-          export STRIP=llvm-strip
+          # ============================================================
+          # Host compiler
+          # ============================================================
+          export HOSTCC="$TOOLCHAIN/bin/clang"
+          export HOSTCXX="$TOOLCHAIN/bin/clang++"
 
+          # Do NOT globally export LD=ld.lld here.
+          # Kbuild's LLVM=1 handles target linker selection.
+          # Keeping LD global can affect HOSTCC linking.
+          unset LD
+
+          # ============================================================
+          # Build metadata
+          # ============================================================
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
           export BUILD_START="$(date)"
@@ -195,13 +187,16 @@ jobs:
           export DEVICE_ID="A12s"
           export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
 
+          # ============================================================
+          # SELinux
+          # ============================================================
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
             echo "Switching SELinux to Permissive mode..."
 
             echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
-              >> arch/arm64/configs/$DEFCONFIG
+              >> "arch/arm64/configs/$DEFCONFIG"
 
-            grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
+            grep "PERMISSIVE" "arch/arm64/configs/$DEFCONFIG"
 
             SELINUX_STATE="Permissive"
           else
@@ -210,33 +205,51 @@ jobs:
 
           echo "SELinux is set to: $SELINUX_STATE"
 
+          # ============================================================
+          # Verify final environment
+          # ============================================================
           echo "========================================"
           echo " Build configuration"
           echo "========================================"
 
-          echo "Toolchain: $TOOLCHAIN"
-          echo "Compiler:"
-          clang --version
+          echo "Toolchain:"
+          echo "$TOOLCHAIN"
 
           echo
-          echo "LLVM:"
-          llvm-as --version
+          echo "Compiler:"
+          "$TOOLCHAIN/bin/clang" --version
 
           echo
           echo "Linker:"
-          ld.lld --version
+          "$TOOLCHAIN/bin/ld.lld" --version
 
           echo
-          echo "Assembler:"
-          command -v as
-          as --version || true
+          echo "LLVM mode:"
+          echo "$LLVM"
 
           echo
-          echo "LLVM mode: $LLVM"
-          echo "LLVM IAS: $LLVM_IAS"
-          echo "Architecture: arm64"
-          echo "Defconfig: $DEFCONFIG"
-          echo "SELinux: $SELINUX_STATE"
+          echo "LLVM IAS:"
+          echo "$LLVM_IAS"
+
+          echo
+          echo "Host compiler:"
+          echo "$HOSTCC"
+
+          echo
+          echo "ARM64 CROSS_COMPILE:"
+          echo "$CROSS_COMPILE"
+
+          echo
+          echo "Architecture:"
+          echo "arm64"
+
+          echo
+          echo "Defconfig:"
+          echo "$DEFCONFIG"
+
+          echo
+          echo "SELinux:"
+          echo "$SELINUX_STATE"
 
           echo
           echo "========================================"
@@ -248,11 +261,15 @@ jobs:
             --jobs "$(nproc --all)" \
             "$DEFCONFIG"
 
-          mv .config build_config.txt
+          # Save final kernel configuration
+          cp .config build_config.txt
 
+          # Build information
           gitsha1="$(git rev-parse --short HEAD)"
 
-          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date '+%Y%m%d%H%M%S')"
+          buildDetails="$(
+            make kernelversion
+          )-${DEVICE_ID}_${gitsha1}-$(date '+%Y%m%d%H%M%S')"
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
@@ -264,3 +281,4 @@ jobs:
             kernel_root/arch/arm64/boot/Image
             kernel_root/arch/arm64/boot/dts/exynos/*.dtb
             kernel_root/arch/arm64/boot/dts/samsung/*.dtb
+            kernel_root/build_config.txt
