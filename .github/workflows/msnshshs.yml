@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           set -e
-
+          
           export TOOLCHAIN="$PWD/toolchains/proton-clang"
           export PATH="$TOOLCHAIN/bin:$PATH"
           export ARCH=arm64
@@ -83,6 +83,17 @@ jobs:
           echo "AArch64 binutils:"
           aarch64-linux-gnu-ld --version
           echo
+          echo "=== Active tools ==="
+          which gcc
+          which ld
+          which clang
+          which aarch64-linux-gnu-ld
+          echo "=== Versions ==="
+          gcc --version
+          ld --version
+          clang --version
+          aarch64-linux-gnu-ld --version
+
           echo "SELinux: $SELINUX_STATE"
 
           
