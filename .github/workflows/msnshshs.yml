@@ -47,8 +47,9 @@ jobs:
       - name: Fetch Proton Clang
         working-directory: kernel_root
         run: |
-          git clone --depth=1 \
-            https://github.com/rasolarmand114-tech/proton-clang.git \
+           git clone --no-checkout https://github.com/kdrag0n/proton-clang.git toolchains/proton-clang
+           git fetch --depth=1 origin 9fb011b183fe7e69b04b873ef6533b4b077e3c5e
+           git checkout 9fb011b183fe7e69b04b873ef6533b4b077e3c5e
             toolchains/proton-clang
 
       - name: Build Kernel
