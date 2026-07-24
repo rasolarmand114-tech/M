@@ -1,4 +1,4 @@
-name: Build Kernel
+name: Build Kernel GCC11 +GCC4.9 LTO
 
 on:
   workflow_dispatch:
