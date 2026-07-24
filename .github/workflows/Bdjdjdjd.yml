@@ -1,4 +1,4 @@
-name: Build Kernel GCC11 +GCC4.9 LTO
+name: Build Kernel GCC11 +GCC4.9 Non LTO
 
 on:
   workflow_dispatch:
@@ -101,7 +101,7 @@ jobs:
           echo "Using linker:"
           $LD --version
 
-          bash $(pwd)/build_kernel.sh kernel --jobs $(nproc --all) $DEFCONFIG
+          bash $(pwd)/build_kernel2.sh kernel --jobs $(nproc --all) $DEFCONFIG
 
           mv .config build_config.txt
           gitsha1=$(git rev-parse --short HEAD)
