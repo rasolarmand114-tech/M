@@ -48,9 +48,19 @@ jobs:
         working-directory: kernel_root
         run: |
            
-           git clone --depth=1 \
-            https://github.com/rasolarmand114-tech/neutron-clang.git \
-            toolchains/neutron-clang
+           mkdir -p toolchains/clang
+           cd toolchains/clang
+
+           git init
+           git remote add origin https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+           git config core.sparseCheckout true
+
+           echo "clang-r450784d" > .git/info/sparse-checkout
+
+           git fetch --depth=1 origin android13-frc-neuralnetworks-release
+           git checkout FETCH_HEAD
+
+           cd ../
 
 
       - name: Build Kernel
@@ -59,7 +69,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          export PATH="$HOME/toolchains/neutron-clang/bin:$PATH"
+          export PATH="$HOME/toolchains/clang/bin:$PATH"
           export ARCH=arm64
           export DEFCONFIG=exlinux_defconfig
           export DEVICE_ID=A12s
