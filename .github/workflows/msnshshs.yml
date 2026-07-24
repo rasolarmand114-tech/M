@@ -32,7 +32,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             bc bison build-essential cpio flex git \
-            libssl-dev lz4 perl python3 tar wget curl gcc
+            libssl-dev lz4 perl python3 tar wget curl 
 
       - name: Create Swap
         run: |
