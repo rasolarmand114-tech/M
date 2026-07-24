@@ -60,6 +60,14 @@ jobs:
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export LLVM_IAS=0
+          export CC=clang
+          export LD=${CROSS_COMPILE}ld
+          export AS=${CROSS_COMPILE}as
+          export AR=${CROSS_COMPILE}ar
+          export NM=${CROSS_COMPILE}nm
+          export OBJCOPY=${CROSS_COMPILE}objcopy
+          export OBJDUMP=${CROSS_COMPILE}objdump
+          export STRIP=${CROSS_COMPILE}strip
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
           export BUILD_START=`date`
