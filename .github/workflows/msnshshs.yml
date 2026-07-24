@@ -48,7 +48,10 @@ jobs:
         working-directory: kernel_root
         run: |
            
-           git clone https://github.com/rasolarmand114-tech/neutron-clang.git
+           rm -rf toolchains
+           mkdir -p toolchains
+           git clone --depth=1 \
+           https://github.com/rasolarmand114-tech/neutron-clang.git \
            toolchains/neutron-clang
 
       - name: Build Kernel
