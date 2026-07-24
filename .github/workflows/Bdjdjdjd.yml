@@ -1,4 +1,4 @@
-name: Build Kernel GCC10 +GCC4.9 Non LTO
+name: Build Kernel GCC12 +GCC4.9 Non LTO
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
           sudo apt install -y \
             bc cpio flex bison git python-is-python3 \
             tar perl wget curl lz4 libssl-dev \
-            gcc-10 gcc-10-aarch64-linux-gnu
+            gcc-12 gcc-12-aarch64-linux-gnu
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
 
@@ -62,7 +62,7 @@ jobs:
           export CROSS_COMPILE=$(pwd)/toolchains/google/bin/aarch64-linux-android-
 
           # GCC 10 → Compiler
-          export CC=aarch64-linux-gnu-gcc-10
+          export CC=aarch64-linux-gnu-gcc-12
 
           # Google GCC 4.9 → Assembler + Linker
           export AS=${CROSS_COMPILE}as
