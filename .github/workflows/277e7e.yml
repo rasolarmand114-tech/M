@@ -1,0 +1,182 @@
+name: Build Kernel clang-r450784d/aosp 
+
+on:
+  workflow_dispatch:
+    inputs:
+      BRANCH:
+        description: Kernel branch
+        default: 'main'
+        required: true
+      SELINUX_PERMISSIVE:
+        description: Permissive SELinux
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          repository: rasolarmand114-tech/exlinux-
+          path: kernel_root
+          ref: ${{ github.event.inputs.BRANCH }}
+          fetch-depth: 0
+
+      - name: Prepare dependencies
+        working-directory: kernel_root
+        run: |
+          sudo apt update -y
+          sudo apt install -y \
+            bc \
+            cpio \
+            flex \
+            bison \
+            git \
+            python-is-python3 \
+            tar \
+            perl \
+            wget \
+            curl \
+            lz4 \
+            libssl-dev
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Recreate 12GB Swap
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /swapfile
+
+          sudo fallocate -l 12G /swapfile || \
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+          free -h
+
+      - name: Fetch AOSP Clang r450784d
+        run: |
+          mkdir -p toolchains
+
+          git clone \
+            --depth=1 \
+            -b android13-release \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            toolchains/aosp-clang
+
+          test -x toolchains/aosp-clang/clang-r450784d/bin/clang
+          test -x toolchains/aosp-clang/clang-r450784d/bin/ld.lld
+
+          toolchains/aosp-clang/clang-r450784d/bin/clang --version
+          toolchains/aosp-clang/clang-r450784d/bin/ld.lld --version
+
+      - name: Configure and Build Kernel
+        id: buildKernel
+        working-directory: kernel_root
+        run: |
+          set -e
+
+          export TOOLCHAIN="$GITHUB_WORKSPACE/kernel_root/toolchains/aosp-clang/clang-r450784d"
+          export PATH="$TOOLCHAIN/bin:$PATH"
+
+          export ARCH=arm64
+
+          export CC=clang
+          export LD=ld.lld
+
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export STRIP=llvm-strip
+          export READELF=llvm-readelf
+          export OBJCOPY=llvm-objcopy
+          export LLVM=1
+          export LLVM_IAS=1
+
+          export KBUILD_BUILD_USER="exlinux"
+          export KBUILD_BUILD_HOST="github"
+
+          export DEFCONFIG="exlinux_defconfig"
+          export DEVICE_ID="A12s"
+          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
+
+          echo "=== Toolchain ==="
+          which clang
+          which ld.lld
+          which llvm-ar
+          which llvm-nm
+          which llvm-objcopy
+          which llvm-objdump
+          which llvm-strip
+
+          clang --version
+          ld.lld --version
+
+          echo "=== Configure ==="
+
+          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
+            echo "Switching SELinux to Permissive mode..."
+
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
+              >> arch/arm64/configs/$DEFCONFIG
+
+            SELINUX_STATE="Permissive"
+          else
+            SELINUX_STATE="Enforcing"
+          fi
+
+          echo "SELinux is set to: $SELINUX_STATE"
+
+          make \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            READELF=llvm-readelf \
+            "$DEFCONFIG"
+
+          echo "=== Build ==="
+
+          make \
+            -j"$(nproc --all)" \
+            ARCH=arm64 \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CC=clang \
+            LD=ld.lld \
+            AR=llvm-ar \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
+            READELF=llvm-readelf
+
+          cp .config build_config.txt
+
+          gitsha1=$(git rev-parse --short HEAD)
+
+          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+
+          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
+
+      - name: Upload kernel images
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+          path: |
+            kernel_root/arch/arm64/boot/Image
+            kernel_root/arch/arm64/boot/Image.gz
+            kernel_root/arch/arm64/boot/dts/exynos/*.dtb
+            kernel_root/arch/arm64/boot/dts/samsung/*.dtb
+            kernel_root/build_config.txt
