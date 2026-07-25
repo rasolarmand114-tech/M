@@ -42,10 +42,11 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
-      - name: Fetch toolchains (Clang 11 AOSP)
+      - name: Fetch toolchains (Clang 11 + GCC 4.9)
         run: |
           mkdir toolchains && cd toolchains
           git clone --depth=1 -b clang-11 https://github.com/rsuntk/toolchains.git clang
+          git clone --depth=1 -b androidcc-4.9 https://github.com/rsuntk/toolchains.git google
         working-directory: kernel_root
 
       - name: Set timezone (Asia/Kolkata)
@@ -56,7 +57,7 @@ jobs:
         id: buildKernel
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
-          export ARCH=arm64
+          
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
