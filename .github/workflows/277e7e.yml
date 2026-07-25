@@ -1,51 +1,70 @@
-name: Build Kernel clang-r450784d/aosp 
+name: Build Kernel clang-r450784d/aosp
 
 on:
   workflow_dispatch:
     inputs:
       BRANCH:
         description: Kernel branch
-        default: 'main'
         required: true
+        default: main
+        type: string
+
       SELINUX_PERMISSIVE:
-        description: Permissive SELinux
+        description: Build kernel with permissive SELinux
+        required: false
+        default: false
         type: boolean
 
 jobs:
   build:
+    name: Build Kernel
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # Checkout Kernel
+      # ============================================================
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
           repository: rasolarmand114-tech/exlinux-
+          ref: ${{ inputs.BRANCH }}
           path: kernel_root
-          ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
 
-      - name: Prepare dependencies
-        working-directory: kernel_root
+      # ============================================================
+      # Install Dependencies
+      # ============================================================
+      - name: Prepare Dependencies
         run: |
-          sudo apt update -y
-          sudo apt install -y \
+          set -e
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
             bc \
+            bison \
             cpio \
             flex \
-            bison \
             git \
+            libssl-dev \
+            lz4 \
+            perl \
             python-is-python3 \
             tar \
-            perl \
             wget \
-            curl \
-            lz4 \
-            libssl-dev
+            curl
 
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/kernel_root"
 
+      # ============================================================
+      # Create 12GB Swap
+      # ============================================================
       - name: Recreate 12GB Swap
         run: |
+          set -e
+
           sudo swapoff -a || true
           sudo rm -f /swapfile
 
@@ -56,48 +75,105 @@ jobs:
           sudo mkswap /swapfile
           sudo swapon /swapfile
 
+          echo "=== Memory ==="
           free -h
 
+          echo "=== Swap ==="
+          swapon --show
+
+      # ============================================================
+      # Fetch AOSP Clang r450784d
+      # ============================================================
       - name: Fetch AOSP Clang r450784d
         run: |
-          mkdir -p toolchains
+          set -e
+
+          TOOLCHAIN_ROOT="$GITHUB_WORKSPACE/toolchains"
+          AOSP_CLANG="$TOOLCHAIN_ROOT/aosp-clang"
+          CLANG="$AOSP_CLANG/clang-r450784d"
+
+          mkdir -p "$TOOLCHAIN_ROOT"
+
+          echo "=== Clone AOSP LLVM Prebuilt ==="
 
           git clone \
             --depth=1 \
             -b android13-release \
             https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-            toolchains/aosp-clang
+            "$AOSP_CLANG"
 
-          test -x toolchains/aosp-clang/clang-r450784d/bin/clang
-          test -x toolchains/aosp-clang/clang-r450784d/bin/ld.lld
+          echo "=== Verify AOSP Clang ==="
 
-          toolchains/aosp-clang/clang-r450784d/bin/clang --version
-          toolchains/aosp-clang/clang-r450784d/bin/ld.lld --version
+          test -x "$CLANG/bin/clang"
+          test -x "$CLANG/bin/ld.lld"
 
+          echo "CLANG=$CLANG"
+
+          echo "=== Clang Path ==="
+          realpath "$CLANG/bin/clang"
+
+          echo "=== LLD Path ==="
+          realpath "$CLANG/bin/ld.lld"
+
+          echo "=== Clang Version ==="
+          "$CLANG/bin/clang" --version
+
+          echo "=== LLD Version ==="
+          "$CLANG/bin/ld.lld" --version
+
+      # ============================================================
+      # Configure & Build Kernel
+      # ============================================================
       - name: Configure and Build Kernel
         id: buildKernel
         working-directory: kernel_root
         run: |
           set -e
 
-          export TOOLCHAIN="$GITHUB_WORKSPACE/kernel_root/toolchains/aosp-clang/clang-r450784d"
-          export PATH="$TOOLCHAIN/bin:$PATH"
-
+          # ========================================================
+          # Kernel Architecture
+          # ========================================================
           export ARCH=arm64
 
-          export CC=clang
-          export LD=ld.lld
+          # ========================================================
+          # AOSP Clang r450784d
+          #
+          # IMPORTANT:
+          # toolchains/ is located in $GITHUB_WORKSPACE
+          # NOT inside kernel_root
+          # ========================================================
+          export TOOLCHAIN="$GITHUB_WORKSPACE/toolchains/aosp-clang/clang-r450784d"
+          export LLVM_BIN="$TOOLCHAIN/bin"
 
-          export AR=llvm-ar
-          export NM=llvm-nm
-          export OBJCOPY=llvm-objcopy
-          export OBJDUMP=llvm-objdump
-          export STRIP=llvm-strip
-          export READELF=llvm-readelf
-          export OBJCOPY=llvm-objcopy
+          # ========================================================
+          # Put AOSP Clang FIRST in PATH
+          # ========================================================
+          export PATH="$LLVM_BIN:$PATH"
+
+          # Clear shell command cache
+          hash -r
+
+          # ========================================================
+          # Force Exact AOSP LLVM Tools
+          # ========================================================
+          export CC="$LLVM_BIN/clang"
+          export LD="$LLVM_BIN/ld.lld"
+          export AR="$LLVM_BIN/llvm-ar"
+          export NM="$LLVM_BIN/llvm-nm"
+          export OBJCOPY="$LLVM_BIN/llvm-objcopy"
+          export OBJDUMP="$LLVM_BIN/llvm-objdump"
+          export STRIP="$LLVM_BIN/llvm-strip"
+          export READELF="$LLVM_BIN/llvm-readelf"
+
+          # ========================================================
+          # LLVM Kernel Build
+          # ========================================================
           export LLVM=1
           export LLVM_IAS=1
 
+          # ========================================================
+          # Build Information
+          # ========================================================
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
 
@@ -105,75 +181,188 @@ jobs:
           export DEVICE_ID="A12s"
           export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
 
-          echo "=== Toolchain ==="
-          which clang
-          which ld.lld
-          which llvm-ar
-          which llvm-nm
-          which llvm-objcopy
-          which llvm-objdump
-          which llvm-strip
+          # ========================================================
+          # Verify Toolchain
+          # ========================================================
+          echo "========================================"
+          echo "           TOOLCHAIN INFORMATION"
+          echo "========================================"
 
-          clang --version
-          ld.lld --version
+          echo "TOOLCHAIN=$TOOLCHAIN"
+          echo "LLVM_BIN=$LLVM_BIN"
+          echo "CC=$CC"
+          echo "LD=$LD"
 
-          echo "=== Configure ==="
+          echo ""
+          echo "=== PATH ==="
+          echo "$PATH"
 
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
-            echo "Switching SELinux to Permissive mode..."
+          echo ""
+          echo "=== Resolved clang ==="
+          type -a clang
 
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
-              >> arch/arm64/configs/$DEFCONFIG
+          echo ""
+          echo "=== Resolved ld.lld ==="
+          type -a ld.lld
+
+          echo ""
+          echo "=== Real clang path ==="
+          realpath "$CC"
+
+          echo ""
+          echo "=== Real ld.lld path ==="
+          realpath "$LD"
+
+          echo ""
+          echo "=== Clang Version ==="
+          "$CC" --version
+
+          echo ""
+          echo "=== LLD Version ==="
+          "$LD" --version
+
+          # ========================================================
+          # Hard Verification
+          # ========================================================
+          test -x "$CC"
+          test -x "$LD"
+          test -x "$AR"
+          test -x "$NM"
+          test -x "$OBJCOPY"
+          test -x "$OBJDUMP"
+          test -x "$STRIP"
+          test -x "$READELF"
+
+          # Make absolutely sure system clang is NOT being used
+          if [ "$(realpath "$CC")" = "/usr/bin/clang" ]; then
+            echo "ERROR: System clang detected!"
+            exit 1
+          fi
+
+          if [ "$(realpath "$LD")" = "/usr/bin/ld.lld" ]; then
+            echo "ERROR: System ld.lld detected!"
+            exit 1
+          fi
+
+          echo ""
+          echo "AOSP Clang r450784d verified successfully."
+
+          # ========================================================
+          # SELinux Configuration
+          # ========================================================
+          echo ""
+          echo "========================================"
+          echo "           SELINUX CONFIGURATION"
+          echo "========================================"
+
+          if [[ "${{ inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
+            echo "SELinux mode: Permissive"
+
+            if ! grep -q "^CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
+              "arch/arm64/configs/$DEFCONFIG"; then
+
+              echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" \
+                >> "arch/arm64/configs/$DEFCONFIG"
+            fi
 
             SELINUX_STATE="Permissive"
           else
+            echo "SELinux mode: Enforcing"
             SELINUX_STATE="Enforcing"
           fi
 
           echo "SELinux is set to: $SELINUX_STATE"
 
+          # ========================================================
+          # Kernel Configuration
+          # ========================================================
+          echo ""
+          echo "========================================"
+          echo "           KERNEL CONFIGURATION"
+          echo "========================================"
+
           make \
-            ARCH=arm64 \
+            ARCH="$ARCH" \
             LLVM=1 \
             LLVM_IAS=1 \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            READELF=llvm-readelf \
+            CC="$CC" \
+            LD="$LD" \
+            AR="$AR" \
+            NM="$NM" \
+            OBJCOPY="$OBJCOPY" \
+            OBJDUMP="$OBJDUMP" \
+            STRIP="$STRIP" \
+            READELF="$READELF" \
             "$DEFCONFIG"
 
-          echo "=== Build ==="
+          # ========================================================
+          # Build Kernel
+          # ========================================================
+          echo ""
+          echo "========================================"
+          echo "           BUILDING KERNEL"
+          echo "========================================"
 
           make \
             -j"$(nproc --all)" \
-            ARCH=arm64 \
+            ARCH="$ARCH" \
             LLVM=1 \
             LLVM_IAS=1 \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            READELF=llvm-readelf
+            CC="$CC" \
+            LD="$LD" \
+            AR="$AR" \
+            NM="$NM" \
+            OBJCOPY="$OBJCOPY" \
+            OBJDUMP="$OBJDUMP" \
+            STRIP="$STRIP" \
+            READELF="$READELF"
 
+          # ========================================================
+          # Verify Kernel Image
+          # ========================================================
+          echo ""
+          echo "========================================"
+          echo "           BUILD OUTPUT"
+          echo "========================================"
+
+          test -f arch/arm64/boot/Image
+
+          echo "Kernel Image:"
+          ls -lh arch/arm64/boot/Image
+
+          # ========================================================
+          # Save Build Config
+          # ========================================================
           cp .config build_config.txt
 
-          gitsha1=$(git rev-parse --short HEAD)
+          # ========================================================
+          # Build Details
+          # ========================================================
+          gitsha1="$(git rev-parse --short HEAD)"
+          kernel_version="$(make kernelversion)"
 
-          buildDetails="$(make kernelversion)-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+          buildDetails="${kernel_version}-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
-      - name: Upload kernel images
+          echo ""
+          echo "========================================"
+          echo "           BUILD SUCCESSFUL"
+          echo "========================================"
+
+          echo "Build Details: $buildDetails"
+          echo "Compiler: $CC"
+          echo "Linker: $LD"
+          echo "SELinux: $SELINUX_STATE"
+
+      # ============================================================
+      # Upload Kernel Artifacts
+      # ============================================================
+      - name: Upload Kernel Images
         uses: actions/upload-artifact@v4
         with:
           name: Kernel-${{ steps.buildKernel.outputs.buildDetails }}
+          if-no-files-found: error
           path: |
             kernel_root/arch/arm64/boot/Image
             kernel_root/arch/arm64/boot/Image.gz
