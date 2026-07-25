@@ -45,7 +45,7 @@ jobs:
       - name: Fetch toolchains (Clang 14 AOSP)
         run: |
           mkdir toolchains && cd toolchains
-          git clone --depth=1 -b  https://github.com/droidian/android-platform-prebuilts-clang-host-linux-x86-33.git clang
+          git clone --depth=1 -b  https://github.com/droidian/android-platform-prebuilts-clang-host-linux-x86-33.git 
           working-directory: kernel_root
 
       - name: Set timezone (Asia/Kolkata)
