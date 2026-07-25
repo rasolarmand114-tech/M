@@ -56,6 +56,7 @@ jobs:
         id: buildKernel
         run: |
           export PATH=$(pwd)/toolchains/clang/bin:$PATH
+          export ARCH=arm64
           export CLANG_TRIPLE=aarch64-linux-gnu-
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
