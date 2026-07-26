@@ -7,6 +7,7 @@ on:
         description: Kernel branch
         default: 'main'
         required: true
+
       SELINUX_PERMISSIVE:
         description: Permissive SELinux
         type: boolean
@@ -23,6 +24,7 @@ jobs:
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
+          submodules: recursive
 
       - name: Prepare dependencies + fetch tags
         working-directory: kernel_root
@@ -45,8 +47,6 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE/kernel_root"
           git fetch --tags --force
 
-      
-      
       - name: Set timezone (Asia/Kolkata)
         run: |
           sudo rm -f /etc/localtime
@@ -56,7 +56,6 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
-
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
           export BUILD_START="$(date)"
@@ -70,7 +69,8 @@ jobs:
           if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
             echo "Switching SELinux to Permissive mode..."
 
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> "arch/arm64/configs/$DEFCONFIG"
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> \
+              "arch/arm64/configs/$DEFCONFIG"
 
             grep "PERMISSIVE" "arch/arm64/configs/$DEFCONFIG"
 
@@ -81,7 +81,9 @@ jobs:
 
           echo "SELinux is set to: $SELINUX_STATE"
 
-          bash ./build.sh kernel --jobs "$(nproc --all)" "$DEFCONFIG"
+          bash ./build.sh kernel \
+            --jobs "$(nproc --all)" \
+            "$DEFCONFIG"
 
           mv .config build_config.txt
 
