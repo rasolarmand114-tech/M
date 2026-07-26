@@ -24,7 +24,7 @@ jobs:
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
-          submodules: recursive
+          
 
       - name: Prepare dependencies + fetch tags
         working-directory: kernel_root
