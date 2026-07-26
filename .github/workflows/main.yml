@@ -33,12 +33,9 @@ jobs:
             tar perl wget curl lz4 libssl-dev
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
-      - name: Recreate 6GB Swap
+      - name: Install proton-clang 
         run: |
-          mkdir toolchain/proton-clang
-          cd toolchain/proton-clang
-          git clone https://github.com/kdrag0n/proton-clang.git
-          cd ../
+          git clone --recurse-submodules <URL-REPO>
       
       - name: Set timezone (Asia/Kolkata)
         run: |
