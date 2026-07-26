@@ -99,6 +99,8 @@ jobs:
           export DEVICE="A12s"
 
           echo "SELinux state: Enforcing"
+          
+          bash ./fix-symlink-ksu-actions.sh
 
           bash ./build.sh kernel \
             --jobs "$(nproc --all)" \
