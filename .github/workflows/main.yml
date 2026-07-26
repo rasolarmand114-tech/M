@@ -34,8 +34,11 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
       - name: Install proton-clang 
+        working-directory: kernel_root
         run: |
           git submodule update --init toolchain/proton-clang
+          git submodule update --init root/nxtKSU
+          git submodule update --init root/susfs
       - name: Set timezone (Asia/Kolkata)
         run: |
           sudo rm /etc/localtime
