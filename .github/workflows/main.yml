@@ -1,4 +1,4 @@
-name: Build Kernel LTO proton-clang 
+name: Build Kernel LTO proton-clang
 
 on:
   workflow_dispatch:
@@ -29,56 +29,91 @@ jobs:
         run: |
           sudo apt update -y
           sudo apt install -y \
-            bc cpio flex bison git python-is-python3 \
-            tar perl wget curl lz4 libssl-dev
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            bc \
+            cpio \
+            flex \
+            bison \
+            git \
+            python-is-python3 \
+            tar \
+            perl \
+            wget \
+            curl \
+            lz4 \
+            libssl-dev
+
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/kernel_root"
           git fetch --tags --force
-      - name: Install proton-clang 
+
+      - name: Install required submodules
         working-directory: kernel_root
         run: |
           git submodule update --init toolchain/proton-clang
           git submodule update --init root/nxtKSU
           git submodule update --init root/susfs
+
+      - name: Verify submodules
+        working-directory: kernel_root
+        run: |
+          echo "Proton Clang:"
+          git -C toolchain/proton-clang rev-parse --short HEAD
+
+          echo "KernelSU-Next:"
+          git -C root/nxtKSU rev-parse --short HEAD
+
+          echo "SUSFS:"
+          git -C root/susfs rev-parse --short HEAD
+
+          echo "Checking Proton Clang..."
+          test -x toolchain/proton-clang/bin/clang
+
+          echo "Clang version:"
+          ./toolchain/proton-clang/bin/clang --version
+
       - name: Set timezone (Asia/Kolkata)
         run: |
-          sudo rm /etc/localtime
+          sudo rm -f /etc/localtime
           sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
+
       - name: Build kernel
         id: buildKernel
+        working-directory: kernel_root
         run: |
-          
+
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
-          export BUILD_START=`date`
+          export BUILD_START="$(date)"
           export IS_CI=true
-          
+
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
+          export DEVICE="A12s"
           export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == 'true' ]]; then
-          echo "Switching SELinux to Permissive mode..."
-          
-          # Set permissive mode in defconfig
-          echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> arch/arm64/configs/$DEFCONFIG
-          grep "PERMISSIVE" arch/arm64/configs/$DEFCONFIG
-    
-          SELINUX_STATE="Permissive"
+
+          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
+            echo "Switching SELinux to Permissive mode..."
+
+            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> "arch/arm64/configs/$DEFCONFIG"
+
+            grep "PERMISSIVE" "arch/arm64/configs/$DEFCONFIG"
+
+            SELINUX_STATE="Permissive"
           else
-          SELINUX_STATE="Enforcing"
+            SELINUX_STATE="Enforcing"
           fi
 
-          # Show final SELinux state
           echo "SELinux is set to: $SELINUX_STATE"
 
-          bash $(pwd)/build.sh kernel --jobs $(nproc --all) $DEFCONFIG
+          bash ./build.sh kernel --jobs "$(nproc --all)" "$DEFCONFIG"
 
-        
-
-  
           mv .config build_config.txt
-          gitsha1=$(git rev-parse --short HEAD)
-          buildDetails="`make kernelversion`-`echo $DEVICE`_`echo $gitsha1`-`date +'%Y%m%d%H%M%S'`" && echo "buildDetails=$buildDetails" >> $GITHUB_OUTPUT
-        working-directory: kernel_root   
+
+          gitsha1="$(git rev-parse --short HEAD)"
+          kernelversion="$(make kernelversion)"
+
+          buildDetails="${kernelversion}-${DEVICE_ID}_${gitsha1}-$(date +'%Y%m%d%H%M%S')"
+
+          echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
