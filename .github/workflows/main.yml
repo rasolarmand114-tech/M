@@ -54,22 +54,10 @@ jobs:
       # ==========================================
       # Initialize Git Submodules
       # ==========================================
-      - name: Initialize Git Submodules
-        working-directory: kernel_root
-        run: |
-          git submodule sync --recursive
-          git submodule update --init --recursive
-
       # ==========================================
       # Fix KernelSU Symlink
       # MUST RUN BEFORE BUILD
-      # ==========================================
-      - name: Fix KernelSU symlink
-        working-directory: kernel_root
-        run: |
-          chmod +x ./fix-symlink-ksu-actions.sh
-          bash ./fix-symlink-ksu-actions.sh
-
+      # =========================================
       # ==========================================
       # Check Disk Space
       # ==========================================
