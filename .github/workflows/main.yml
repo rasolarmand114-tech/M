@@ -45,31 +45,8 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE/kernel_root"
           git fetch --tags --force
 
-      - name: Install required submodules
-        working-directory: kernel_root
-        run: |
-          git submodule update --init toolchain/proton-clang
-          git submodule update --init root/nxtKSU
-          git submodule update --init root/susfs
-
-      - name: Verify submodules
-        working-directory: kernel_root
-        run: |
-          echo "Proton Clang:"
-          git -C toolchain/proton-clang rev-parse --short HEAD
-
-          echo "KernelSU-Next:"
-          git -C root/nxtKSU rev-parse --short HEAD
-
-          echo "SUSFS:"
-          git -C root/susfs rev-parse --short HEAD
-
-          echo "Checking Proton Clang..."
-          test -x toolchain/proton-clang/bin/clang
-
-          echo "Clang version:"
-          ./toolchain/proton-clang/bin/clang --version
-
+      
+      
       - name: Set timezone (Asia/Kolkata)
         run: |
           sudo rm -f /etc/localtime
