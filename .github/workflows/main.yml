@@ -17,6 +17,29 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ==========================================
+      # Free Disk Space BEFORE Checkout
+      # ==========================================
+      - name: Free disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache
+
+          sudo apt-get clean
+
+          echo "Disk space after cleanup:"
+          df -h
+
+      # ==========================================
+      # Checkout Kernel
+      # ==========================================
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
@@ -24,12 +47,24 @@ jobs:
           path: kernel_root
           ref: ${{ github.event.inputs.BRANCH }}
           fetch-depth: 0
-          
+          submodules: false
 
-      - name: Prepare dependencies + fetch tags
+      
+      # ==========================================
+      # Check Disk Space
+      # ==========================================
+      - name: Check disk space
+        run: |
+          df -h
+
+      # ==========================================
+      # Prepare Dependencies
+      # ==========================================
+      - name: Prepare dependencies
         working-directory: kernel_root
         run: |
           sudo apt update -y
+
           sudo apt install -y \
             bc \
             cpio \
@@ -44,14 +79,9 @@ jobs:
             lz4 \
             libssl-dev
 
-          git config --global --add safe.directory "$GITHUB_WORKSPACE/kernel_root"
-          git fetch --tags --force
-
-      - name: Set timezone (Asia/Kolkata)
-        run: |
-          sudo rm -f /etc/localtime
-          sudo ln -s /usr/share/zoneinfo/Asia/Kolkata /etc/localtime
-
+      # ==========================================
+      # Build Kernel
+      # ==========================================
       - name: Build kernel
         id: buildKernel
         working-directory: kernel_root
@@ -64,24 +94,12 @@ jobs:
           export DEFCONFIG="exlinux_defconfig"
           export DEVICE_ID="A12s"
           export DEVICE="A12s"
-          export KERNEL_SOURCE="https://github.com/rasolarmand114-tech/exlinux-"
 
-          if [[ "${{ github.event.inputs.SELINUX_PERMISSIVE }}" == "true" ]]; then
-            echo "Switching SELinux to Permissive mode..."
+          echo "SELinux state: Enforcing"
 
-            echo "CONFIG_SECURITY_SELINUX_ALWAYS_PERMISSIVE=y" >> \
-              "arch/arm64/configs/$DEFCONFIG"
-
-            grep "PERMISSIVE" "arch/arm64/configs/$DEFCONFIG"
-
-            SELINUX_STATE="Permissive"
-          else
-            SELINUX_STATE="Enforcing"
-          fi
-
-          echo "SELinux is set to: $SELINUX_STATE"
-
-          bash ./build.sh exlinux_defconfig "$(nproc --all)"
+          bash ./build.sh kernel \
+            --jobs "$(nproc --all)" \
+            "$DEFCONFIG"
 
           mv .config build_config.txt
 
@@ -92,6 +110,9 @@ jobs:
 
           echo "buildDetails=$buildDetails" >> "$GITHUB_OUTPUT"
 
+      # ==========================================
+      # Upload Kernel
+      # ==========================================
       - name: Upload kernel images
         uses: actions/upload-artifact@v4
         with:
