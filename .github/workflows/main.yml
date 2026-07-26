@@ -35,13 +35,10 @@ jobs:
           git fetch --tags --force
       - name: Recreate 6GB Swap
         run: |
-          sudo swapoff -a || true
-          sudo rm -f /swapfile
-          sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
+          mkdir toolchain/proton-clang
+          cd toolchain/proton-clang
+          git clone https://github.com/kdrag0n/proton-clang.git
+          cd ../
       
       - name: Set timezone (Asia/Kolkata)
         run: |
