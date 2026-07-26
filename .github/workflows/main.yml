@@ -35,7 +35,6 @@ jobs:
           sudo apt-get clean
           sudo swapoff -a
           sudo rm -f /swapfile
-          
 
           echo "Disk space after cleanup:"
           df -h
@@ -52,7 +51,25 @@ jobs:
           fetch-depth: 0
           submodules: false
 
-      
+      # ==========================================
+      # Initialize Git Submodules
+      # ==========================================
+      - name: Initialize Git Submodules
+        working-directory: kernel_root
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      # ==========================================
+      # Fix KernelSU Symlink
+      # MUST RUN BEFORE BUILD
+      # ==========================================
+      - name: Fix KernelSU symlink
+        working-directory: kernel_root
+        run: |
+          chmod +x ./fix-symlink-ksu-actions.sh
+          bash ./fix-symlink-ksu-actions.sh
+
       # ==========================================
       # Check Disk Space
       # ==========================================
@@ -99,8 +116,6 @@ jobs:
           export DEVICE="A12s"
 
           echo "SELinux state: Enforcing"
-          
-          bash ./fix-symlink-ksu-actions.sh
 
           bash ./build.sh kernel \
             --jobs "$(nproc --all)" \
