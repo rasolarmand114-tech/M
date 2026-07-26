@@ -33,11 +33,11 @@ jobs:
             tar perl wget curl lz4 libssl-dev
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --tags --force
-      - name: Recreate 12GB Swap
+      - name: Recreate 6GB Swap
         run: |
           sudo swapoff -a || true
           sudo rm -f /swapfile
-          sudo fallocate -l 12G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=12288
+          sudo fallocate -l 6G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=6144
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
