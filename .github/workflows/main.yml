@@ -35,8 +35,7 @@ jobs:
           git fetch --tags --force
       - name: Install proton-clang 
         run: |
-          git clone --recurse-submodules <URL-REPO>
-      
+          git submodule update --init toolchain/proton-clang
       - name: Set timezone (Asia/Kolkata)
         run: |
           sudo rm /etc/localtime
