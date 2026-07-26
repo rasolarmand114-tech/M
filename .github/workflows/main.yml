@@ -81,9 +81,7 @@ jobs:
 
           echo "SELinux is set to: $SELINUX_STATE"
 
-          bash ./build.sh kernel \
-            --jobs "$(nproc --all)" \
-            "$DEFCONFIG"
+          bash ./build.sh exlinux_defconfig "$(nproc --all)"
 
           mv .config build_config.txt
 
