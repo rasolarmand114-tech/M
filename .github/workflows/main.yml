@@ -33,6 +33,9 @@ jobs:
           sudo rm -rf /opt/hostedtoolcache
 
           sudo apt-get clean
+          sudo swapoff -a
+          sudo rm -f /swapfile
+          
 
           echo "Disk space after cleanup:"
           df -h
