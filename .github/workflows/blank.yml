@@ -87,12 +87,15 @@ jobs:
         run: |
           wget -P src "${{ inputs.source }}"
 
+      
       - name: Checkout Target Repository
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/${{ inputs.target_repo }}
-          token: ${{ secrets.PAT }}
+          token: ${{ github.token }}
           path: target
+          fetch-depth: 1
+          persist-credentials: true
 
       - name: Clean Repository
         if: ${{ inputs.clean == 'true' }}
