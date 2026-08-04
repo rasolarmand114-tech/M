@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       BRANCH:
-        description: Kernel branch
-        
-        
+        description: Kernel branch/tag
+        required: true
+        default: v5.12
 
 jobs:
   build:
@@ -38,18 +38,21 @@ jobs:
       # ==========================================
       # Checkout Kernel
       # ==========================================
-      - name: gut
-        
+      - name: Checkout kernel
         run: |
-          git clone --branch v5.12 --depth 1 https://github.com/torvalds/linux.git 
-          kernel_root
-      - name: Free disk space
+          git clone \
+            --branch "${{ github.event.inputs.BRANCH }}" \
+            --depth 1 \
+            https://github.com/torvalds/linux.git \
+            kernel_root
+
+      # ==========================================
+      # Search symbols
+      # ==========================================
+      - name: Search symbols
         working-directory: kernel_root
-        
         run: |
-        
-           git grep "HAVE_PREEMPT_DYNAMIC"
-           git grep "PREEMPT_DYNAMIC_CALL"
-           git grep "PREEMPT_DYNAMIC_KEY"
-           git grep "preempt_dynamic"
-        
+          git grep "HAVE_PREEMPT_DYNAMIC"
+          git grep "PREEMPT_DYNAMIC_CALL"
+          git grep "PREEMPT_DYNAMIC_KEY"
+          git grep "preempt_dynamic"
