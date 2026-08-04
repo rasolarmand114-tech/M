@@ -1,0 +1,52 @@
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      BRANCH:
+        description: Kernel branch
+        default: 'main'
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      # ==========================================
+      # Free Disk Space BEFORE Checkout
+      # ==========================================
+      - name: Free disk space
+        run: |
+          echo "Disk space before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/powershell
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /opt/hostedtoolcache
+
+          sudo apt-get clean
+          sudo swapoff -a
+          sudo rm -f /swapfile
+
+          echo "Disk space after cleanup:"
+          df -h
+
+      # ==========================================
+      # Checkout Kernel
+      # ==========================================
+      - name: gut
+        run: |
+          git clone --branch v5.12 --depth 1 https://github.com/torvalds/linux.git
+          
+      - name: Free disk space
+        run: |
+        
+           git grep "HAVE_PREEMPT_DYNAMIC"
+           git grep "PREEMPT_DYNAMIC_CALL"
+           git grep "PREEMPT_DYNAMIC_KEY"
+           git grep "preempt_dynamic"
+        
