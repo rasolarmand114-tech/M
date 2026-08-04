@@ -94,6 +94,10 @@ jobs:
         id: buildKernel
         working-directory: kernel_root
         run: |
+          git grep "HAVE_PREEMPT_DYNAMIC"
+          git grep "PREEMPT_DYNAMIC_CALL"
+          git grep "PREEMPT_DYNAMIC_KEY"
+          git grep "preempt_dynamic"
           export KBUILD_BUILD_USER="exlinux"
           export KBUILD_BUILD_HOST="github"
           export BUILD_START="$(date)"
