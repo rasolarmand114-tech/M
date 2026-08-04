@@ -39,10 +39,10 @@ jobs:
       # Checkout Kernel
       # ==========================================
       - name: gut
-        working-directory: kernel_root
+        
         run: |
-          git clone --branch v5.12 --depth 1 https://github.com/torvalds/linux.git
-          
+          git clone --branch v5.12 --depth 1 https://github.com/torvalds/linux.git 
+          kernel_root
       - name: Free disk space
         working-directory: kernel_root
         
