@@ -5,8 +5,8 @@ on:
     inputs:
       BRANCH:
         description: Kernel branch
-        default: 'main'
-        required: true
+        
+        
 
 jobs:
   build:
@@ -39,10 +39,13 @@ jobs:
       # Checkout Kernel
       # ==========================================
       - name: gut
+        working-directory: kernel_root
         run: |
           git clone --branch v5.12 --depth 1 https://github.com/torvalds/linux.git
           
       - name: Free disk space
+        working-directory: kernel_root
+        
         run: |
         
            git grep "HAVE_PREEMPT_DYNAMIC"
