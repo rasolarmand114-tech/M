@@ -1,4 +1,4 @@
-name: Build Kernel LTO proton-clang
+name: Build Kernel LTO proton
 
 on:
   workflow_dispatch:
